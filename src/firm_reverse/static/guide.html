@@ -69,6 +69,11 @@
   tr:first-child td { border-top: 0; }
   td.mark { font-family: var(--mono); font-weight: 600; }
   td.usd { text-align: right; font-family: var(--mono); white-space: nowrap; }
+  #sheetBtn { margin-top: 10px; min-height: 42px; }
+  .sheet { border-top: 1px solid var(--rule); padding: 8px 0; font-size: 13.5px; }
+  .sheet .head { font-family: var(--mono); font-weight: 600; }
+  .sheet a { color: var(--trace); }
+  .pins { font: 12px var(--mono); color: var(--muted); }
   .total { display: flex; justify-content: space-between; font-weight: 700; padding-top: 8px; border-top: 2px solid var(--ink); margin-top: 4px; }
   .empty { color: var(--muted); font-size: 14px; }
   .text { white-space: normal; max-width: 80ch; }
@@ -147,6 +152,9 @@
       <section class="card">
         <h2>Parts</h2>
         <table id="parts"><tr><td class="empty">Chips show up here once a shot makes their markings readable.</td></tr></table>
+        <button class="quiet" id="sheetBtn" disabled>Check against datasheets</button>
+        <div class="empty" id="sheetStatus">A Gemini managed agent finds each chip's datasheet on the web and checks the photo reading. Takes about a minute; keep shooting.</div>
+        <div id="sheets"></div>
       </section>
       <section class="card">
         <h2>Order the kit</h2>
@@ -167,6 +175,7 @@ let shots = 0;
 $("media").addEventListener("change", () => { $("send").disabled = busy || !$("media").files.length; });
 $("send").addEventListener("click", sendShot);
 $("specBtn").addEventListener("click", writeSpec);
+$("sheetBtn").addEventListener("click", checkDatasheets);
 $("chatForm").addEventListener("submit", (e) => { e.preventDefault(); ask(); });
 
 async function ensureSession() {
@@ -232,6 +241,7 @@ function setBusy(on, message, isError = false) {
   $("send").disabled = on || !$("media").files.length;
   $("askBtn").disabled = on;
   $("specBtn").disabled = on || shots === 0;
+  $("sheetBtn").disabled = on || shots === 0 || researching;
   $("status").textContent = message;
   $("status").className = "status" + (isError ? " error" : "");
 }
@@ -274,6 +284,56 @@ function render(turn) {
   )) : [el("tr", {}, el("td", { className: "empty", textContent: "Nothing to buy for the next step." }))]));
   const total = items.reduce((sum, i) => sum + (Number(i.approx_usd) || 0), 0);
   $("total").replaceChildren(...(total ? [el("div", { className: "total" }, el("span", { textContent: "Kit total, approx." }), el("span", { textContent: `$${total.toFixed(0)}` }))] : []));
+}
+
+async function readEvents(res, onEvent) {
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) return;
+    buffer += decoder.decode(value, { stream: true });
+    const events = buffer.split("\n\n");
+    buffer = events.pop();
+    for (const raw of events) if (raw.startsWith("data: ")) onEvent(JSON.parse(raw.slice(6)));
+  }
+}
+
+let researching = false;
+async function checkDatasheets() {
+  researching = true;
+  $("sheetBtn").disabled = true;
+  $("sheetStatus").textContent = "Starting the datasheet agent…";
+  try {
+    const res = await api(`/api/guide/${sessionId}/datasheets`, { method: "POST" });
+    await readEvents(res, (ev) => {
+      if (ev.kind === "status") $("sheetStatus").textContent = ev.text;
+      if (ev.kind === "error") throw new Error(ev.message);
+      if (ev.kind === "done") renderSheets(ev.results);
+    });
+    $("sheetStatus").textContent = "Checked. The next shot and the spec now use these datasheets.";
+  } catch (e) {
+    $("sheetStatus").textContent = `The datasheet agent stopped: ${e.message}`;
+  } finally {
+    researching = false;
+    $("sheetBtn").disabled = busy || shots === 0;
+  }
+}
+
+function renderSheets(results) {
+  const clip = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + "…" : s || "");
+  $("sheets").replaceChildren(...results.map((r) => {
+    const verdict = r.verified === true ? "confirmed" : r.verified === false ? "unknown" : "likely";
+    const label = r.verified === true ? "matches" : r.verified === false ? "mismatch" : "unchecked";
+    const pins = (r.probe_pins || []).slice(0, 4).map((p) => `${p.pin} (${p.number})`).join(", ");
+    return el("div", { className: "sheet" },
+      el("div", {}, el("span", { className: `pill ${verdict}`, textContent: label }), " ",
+        el("span", { className: "head", textContent: clip(r.corrected_marking || r.part_number || r.marking, 40) })),
+      el("div", { textContent: clip([r.manufacturer, r.package, r.supply_voltage].filter(Boolean).join(", "), 120) }),
+      pins ? el("div", { className: "pins", textContent: `Probe: ${pins}` }) : "",
+      /^https?:\/\//.test(r.datasheet_url || "") ? el("a", { href: r.datasheet_url, target: "_blank", rel: "noopener noreferrer", textContent: "Datasheet the agent found" }) : "");
+  }));
 }
 
 async function writeSpec() {

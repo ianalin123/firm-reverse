@@ -8,3 +8,5 @@ datasheets/*.pdf
 datasheets/index.json
 spec.md
 .env.local
+.agents/
+skills-lock.json

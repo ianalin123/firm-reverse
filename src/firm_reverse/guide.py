@@ -74,6 +74,7 @@ class Session:
     shots: list[Shot] = field(default_factory=list)
     turns: list[dict] = field(default_factory=list)
     messages: list[tuple[int, str]] = field(default_factory=list)
+    datasheets: list[dict] = field(default_factory=list)
 
     @property
     def state(self) -> dict | None:
@@ -149,6 +150,8 @@ class Guide:
             parts.append(types.Part.from_uri(file_uri=shot.uploaded.uri, mime_type=shot.mime))
             parts += [types.Part.from_text(text=f"User message: {text}") for after, text in earlier if after == shot.index]
         parts += [types.Part.from_text(text=f"User message: {text}") for after, text in earlier if after == 0]
+        if session.datasheets:
+            parts.append(types.Part.from_text(text="Datasheet agent findings (web research, cite as datasheet):\n" + json.dumps(session.datasheets)))
         if session.state:
             parts.append(types.Part.from_text(text="Your previous state:\n" + json.dumps(session.state)))
         parts.append(types.Part.from_text(text=instruction))

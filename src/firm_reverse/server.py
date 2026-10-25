@@ -123,6 +123,7 @@ _guide = None
 _sessions: dict = {}
 _session_locks: dict[str, threading.Lock] = {}
 MAX_SESSIONS = 50
+_researching: set[str] = set()
 
 
 def guide():
@@ -214,6 +215,42 @@ async def guide_chat(session_id: str, message: str = Form(...)):
         raise HTTPException(422, str(e))
     except Exception as e:
         raise HTTPException(502, f"{type(e).__name__}: {e}")
+
+
+@app.post("/api/guide/{session_id}/datasheets")
+def guide_datasheets(session_id: str):
+    from .agents import research_parts
+
+    session, _ = _session(session_id)
+    parts = list((session.state or {}).get("parts", []))
+    if session_id in _researching:
+        raise HTTPException(409, "the datasheet agent is already running for this session")
+    if not parts:
+        raise HTTPException(422, "no parts identified yet; send a shot that shows the chips")
+    events: queue.Queue = queue.Queue()
+
+    def work():
+        try:
+            results = research_parts(parts, client=guide().client, on_status=lambda text: events.put(json.dumps({"kind": "status", "text": text})))
+            session.datasheets = results
+            events.put(json.dumps({"kind": "done", "results": results}))
+        except Exception as e:  # surfaced to the UI, never swallowed
+            events.put(json.dumps({"kind": "error", "message": f"{type(e).__name__}: {e}"}))
+        finally:
+            _researching.discard(session_id)
+            events.put(None)
+
+    _researching.add(session_id)
+    threading.Thread(target=work, daemon=True).start()
+
+    async def stream():
+        while True:
+            item = await asyncio.to_thread(events.get)
+            if item is None:
+                return
+            yield f"data: {item}\n\n"
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
 
 
 @app.post("/api/guide/{session_id}/spec")
