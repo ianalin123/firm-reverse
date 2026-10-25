@@ -42,7 +42,7 @@ def gemma():
         return _gemma
 
 
-MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+MAX_UPLOAD_BYTES = 150 * 1024 * 1024
 MAX_PHOTOS = 8
 
 
@@ -111,7 +111,94 @@ def _label(protocol: str, data: dict) -> str:
 
 @app.get("/")
 def index():
+    return FileResponse(STATIC / "guide.html")
+
+
+@app.get("/bench")
+def bench_page():
     return FileResponse(STATIC / "index.html")
+
+
+_guide = None
+_sessions: dict = {}
+_session_locks: dict[str, threading.Lock] = {}
+MAX_SESSIONS = 50
+
+
+def guide():
+    global _guide
+    with _gemma_lock:
+        if _guide is None:
+            from .guide import Guide
+
+            _guide = Guide()
+        return _guide
+
+
+def _session(session_id: str):
+    if session_id not in _sessions:
+        raise HTTPException(404, "unknown session; start a new one")
+    return _sessions[session_id]
+
+
+@app.post("/api/guide/session")
+def guide_session():
+    if len(_sessions) >= MAX_SESSIONS:
+        oldest = next(iter(_sessions))
+        shutil.rmtree(_sessions.pop(oldest)[1], ignore_errors=True)
+        _session_locks.pop(oldest, None)
+    session = guide().new_session()
+    _sessions[session.id] = (session, Path(tempfile.mkdtemp()))
+    _session_locks[session.id] = threading.Lock()
+    return {"id": session.id}
+
+
+@app.post("/api/guide/{session_id}/shot")
+async def guide_shot(session_id: str, note: str = Form(""), media: UploadFile = File(...)):
+    session, directory = _session(session_id)
+    shot_dir = directory / str(len(session.shots) + 1)
+    shot_dir.mkdir(exist_ok=True)
+    path = await _save(media, shot_dir)
+
+    def work():
+        with _session_locks[session_id]:
+            shot = guide().add_shot(session, path, note)
+            return {"shot": shot.index, "turn": guide().step(session)}
+
+    try:
+        return await asyncio.to_thread(work)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    except Exception as e:
+        raise HTTPException(502, f"{type(e).__name__}: {e}")
+
+
+@app.post("/api/guide/{session_id}/spec")
+def guide_spec(session_id: str):
+    session, _ = _session(session_id)
+    events: queue.Queue = queue.Queue()
+
+    def work():
+        try:
+            with _session_locks[session_id]:
+                for text in guide().stream_spec(session):
+                    events.put(json.dumps({"kind": "token", "text": text}))
+            events.put(json.dumps({"kind": "done"}))
+        except Exception as e:  # surfaced to the UI, never swallowed
+            events.put(json.dumps({"kind": "error", "message": f"{type(e).__name__}: {e}"}))
+        finally:
+            events.put(None)
+
+    threading.Thread(target=work, daemon=True).start()
+
+    async def stream():
+        while True:
+            item = await asyncio.to_thread(events.get)
+            if item is None:
+                return
+            yield f"data: {item}\n\n"
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
 
 
 @app.post("/api/signals")

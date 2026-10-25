@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Firm Reverse</title>
+<style>
+  :root {
+    --paper: #f3f6f7;
+    --panel: #ffffff;
+    --ink: #15222e;
+    --muted: #5d6b77;
+    --rule: #d5dde2;
+    --trace: #2457c5;
+    --decode: #e0a100;
+    --decode-wash: #fff4d1;
+    --fault: #c23b22;
+    --fault-wash: #fdeae6;
+    --good: #2f9e5b;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.5 var(--sans); }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 16px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  h1 { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -0.02em; white-space: nowrap; }
+  header a { color: var(--muted); font-size: 13px; }
+  .ask { margin: 18px 0 14px; }
+  .ask .kind { font: 600 13px var(--mono); color: var(--trace); }
+  .ask p { margin: 4px 0 0; font-size: clamp(22px, 4.2vw, 34px); line-height: 1.2; font-weight: 700; letter-spacing: -0.015em; max-width: 30ch; }
+  .ask .why { font-size: 14px; color: var(--muted); margin-top: 8px; max-width: 70ch; }
+  .safety { background: var(--fault-wash); border-left: 4px solid var(--fault); padding: 10px 14px; border-radius: 4px; margin: 0 0 14px; font-weight: 600; }
+  .safety:empty { display: none; }
+  .shoot { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: stretch; }
+  .camera { position: relative; display: flex; align-items: center; justify-content: center; background: var(--ink); color: #fff; font-weight: 700; border-radius: 8px; padding: 0 18px; cursor: pointer; min-height: 52px; }
+  .camera input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .camera:focus-within { outline: 2px solid var(--trace); outline-offset: 2px; }
+  input[type=text] { font: 15px var(--sans); border: 1px solid var(--rule); border-radius: 8px; padding: 0 12px; min-width: 0; background: var(--panel); color: var(--ink); }
+  button { font: 700 15px var(--sans); background: var(--trace); color: #fff; border: 0; border-radius: 8px; padding: 0 18px; cursor: pointer; min-height: 52px; }
+  button.quiet { background: var(--panel); color: var(--ink); border: 1px solid var(--rule); }
+  button:disabled { opacity: 0.4; cursor: default; }
+  button:focus-visible, input[type=text]:focus-visible { outline: 2px solid var(--trace); outline-offset: 2px; }
+  .status { color: var(--muted); font-size: 13px; min-height: 20px; margin-top: 6px; }
+  .status.error { color: var(--fault); font-weight: 600; }
+  .film { display: flex; gap: 8px; overflow-x: auto; padding: 12px 0 4px; }
+  .film figure { margin: 0; flex: 0 0 auto; width: 92px; }
+  .film img, .film video { width: 92px; height: 92px; object-fit: cover; border-radius: 6px; display: block; background: var(--rule); }
+  .film figcaption { font: 12px var(--mono); color: var(--muted); }
+  .grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 20px; margin-top: 18px; }
+  section h2 { font-size: 15px; margin: 0 0 8px; }
+  .device { font-size: 18px; font-weight: 700; margin: 0; }
+  .meter { height: 6px; background: var(--rule); border-radius: 3px; margin: 8px 0 4px; overflow: hidden; }
+  .meter span { display: block; height: 100%; background: var(--good); width: 0; transition: width 0.4s; }
+  .card { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; }
+  ul.claims { list-style: none; margin: 0; padding: 0; }
+  ul.claims li { display: grid; grid-template-columns: 76px 1fr; gap: 8px; padding: 6px 0; border-top: 1px solid var(--rule); }
+  ul.claims li:first-child { border-top: 0; }
+  ul.claims li.empty { display: block; }
+  .pill { font: 600 11.5px var(--mono); border-radius: 4px; padding: 2px 6px; align-self: start; text-align: center; }
+  .pill.confirmed { background: #e3f4ea; color: #1d6b3d; }
+  .pill.likely { background: var(--decode-wash); color: #6b4d00; }
+  .pill.unknown { background: var(--paper); color: var(--muted); }
+  .ev { font: 12px var(--mono); color: var(--trace); margin-left: 6px; white-space: nowrap; }
+  .revised { font-size: 13px; color: #6b4d00; background: var(--decode-wash); border-radius: 4px; padding: 6px 10px; margin-top: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  td { padding: 6px 4px; border-top: 1px solid var(--rule); vertical-align: top; }
+  tr:first-child td { border-top: 0; }
+  td.mark { font-family: var(--mono); font-weight: 600; }
+  td.usd { text-align: right; font-family: var(--mono); white-space: nowrap; }
+  .total { display: flex; justify-content: space-between; font-weight: 700; padding-top: 8px; border-top: 2px solid var(--ink); margin-top: 4px; }
+  .empty { color: var(--muted); font-size: 14px; }
+  .text { white-space: normal; max-width: 80ch; }
+  .text h2, .text h3, .text h4 { font-size: 15px; margin: 14px 0 4px; }
+  .text ul { margin: 4px 0; padding-left: 20px; }
+  .text p { margin: 6px 0; }
+  .text code { font: 12.5px var(--mono); background: var(--paper); padding: 1px 4px; border-radius: 3px; }
+  .text.streaming { white-space: pre-wrap; }
+  @media (max-width: 760px) {
+    .grid { grid-template-columns: 1fr; }
+    .shoot { grid-template-columns: 1fr 1fr; }
+    .shoot input[type=text] { grid-column: 1 / -1; grid-row: 1; min-height: 48px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Firm Reverse</h1>
+    <a href="/bench">Have a logic analyzer? Open the probe bench</a>
+  </header>
+
+  <div class="ask" aria-live="polite">
+    <div class="kind" id="kind">first shot</div>
+    <p id="instruction">Put the device on a plain surface and film it for 15 seconds, turning it slowly so every side shows.</p>
+    <div class="why" id="why">Start closed. The guide will tell you how to open it and what to shoot next.</div>
+  </div>
+  <div class="safety" id="safety" role="alert"></div>
+
+  <div class="shoot">
+    <label class="camera">Take shot<input id="media" type="file" accept="image/*,video/*" capture="environment"></label>
+    <input id="note" type="text" placeholder="Optional note, like “this is the back”">
+    <button id="send" disabled>Send shot</button>
+  </div>
+  <div class="status" id="status"></div>
+  <div class="film" id="film"></div>
+
+  <div class="grid">
+    <div>
+      <section class="card">
+        <p class="device" id="device">No device yet</p>
+        <div class="meter"><span id="meter"></span></div>
+        <div class="empty" id="confidence">Confidence rises as shots confirm each claim.</div>
+      </section>
+      <section class="card">
+        <h2>What it knows, and how it knows it</h2>
+        <ul class="claims" id="claims"><li class="empty">Claims appear after the first shot, each tied to the shots that prove it.</li></ul>
+        <div id="revisions"></div>
+      </section>
+      <section class="card">
+        <h2>Spec</h2>
+        <button class="quiet" id="specBtn" disabled>Write the spec</button>
+        <div class="text" id="spec"></div>
+      </section>
+    </div>
+    <div>
+      <section class="card">
+        <h2>Parts</h2>
+        <table id="parts"><tr><td class="empty">Chips show up here once a shot makes their markings readable.</td></tr></table>
+      </section>
+      <section class="card">
+        <h2>Kit for this teardown</h2>
+        <table id="shopping"><tr><td class="empty">The tools you need for the next steps, nothing more.</td></tr></table>
+        <div id="total"></div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const el = (tag, props = {}, ...children) => { const n = Object.assign(document.createElement(tag), props); n.append(...children); return n; };
+let sessionId = null;
+let busy = false;
+let shots = 0;
+
+$("media").addEventListener("change", () => { $("send").disabled = busy || !$("media").files.length; });
+$("send").addEventListener("click", sendShot);
+$("specBtn").addEventListener("click", writeSpec);
+
+async function api(path, options) {
+  const res = await fetch(path, options);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || `${res.status} ${res.statusText}`);
+  }
+  return res;
+}
+
+async function sendShot() {
+  const file = $("media").files[0];
+  if (!file) return;
+  setBusy(true, file.type.startsWith("video/") ? "Uploading the video and watching it…" : "Looking at the photo…");
+  try {
+    if (!sessionId) sessionId = (await (await api("/api/guide/session", { method: "POST" })).json()).id;
+    addToFilm(file, shots + 1);
+    const form = new FormData();
+    form.append("media", file);
+    form.append("note", $("note").value);
+    const { shot, turn } = await (await api(`/api/guide/${sessionId}/shot`, { method: "POST", body: form })).json();
+    shots = shot;
+    render(turn);
+    $("media").value = "";
+    $("note").value = "";
+    setBusy(false, `Shot ${shot} checked.`);
+  } catch (e) {
+    $("film").lastChild?.remove();
+    setBusy(false, `That shot did not go through: ${e.message}. Try again.`, true);
+  }
+}
+
+function setBusy(on, message, isError = false) {
+  busy = on;
+  $("send").disabled = on || !$("media").files.length;
+  $("specBtn").disabled = on || shots === 0;
+  $("status").textContent = message;
+  $("status").className = "status" + (isError ? " error" : "");
+}
+
+function addToFilm(file, index) {
+  const url = URL.createObjectURL(file);
+  const media = file.type.startsWith("video/") ? el("video", { src: url, muted: true, playsInline: true }) : el("img", { src: url, alt: `Shot ${index}` });
+  $("film").append(el("figure", {}, media, el("figcaption", { textContent: `#${index}` })));
+}
+
+function render(turn) {
+  const next = turn.next || {};
+  $("kind").textContent = next.kind === "done" ? "done" : `next: ${next.kind || "photo"}`;
+  $("instruction").textContent = next.kind === "done" ? "That is everything a camera can settle. Write the spec." : next.instruction;
+  $("why").textContent = next.why || "";
+  $("safety").textContent = turn.safety || "";
+  $("device").textContent = turn.device || "Unknown device";
+  const pct = Math.round(Math.max(0, Math.min(1, Number(turn.confidence) || 0)) * 100);
+  $("meter").style.width = pct + "%";
+  $("confidence").textContent = `${pct}% confident`;
+
+  $("claims").replaceChildren(...(turn.claims.length ? turn.claims.map((c) => el("li", {},
+    el("span", { className: `pill ${c.status}`, textContent: c.status }),
+    el("span", {}, c.claim, el("span", { className: "ev", textContent: (c.evidence || []).map((n) => `#${n}`).join(" ") }))
+  )) : [el("li", { className: "empty", textContent: "No claims yet." })]));
+  $("revisions").replaceChildren(...turn.revisions.map((r) => el("div", { className: "revised", textContent: `Revised: ${r}` })));
+
+  $("parts").replaceChildren(...(turn.parts.length ? turn.parts.map((p) => el("tr", {},
+    el("td", { className: "mark", textContent: p.marking }),
+    el("td", {}, p.function, el("span", { className: "ev", textContent: (p.evidence || []).map((n) => `#${n}`).join(" ") }))
+  )) : [el("tr", {}, el("td", { className: "empty", textContent: "No readable markings yet." }))]));
+
+  const items = turn.shopping_list;
+  $("shopping").replaceChildren(...(items.length ? items.map((i) => el("tr", {},
+    el("td", {}, el("strong", { textContent: i.item }), el("div", { className: "empty", textContent: i.why })),
+    el("td", { className: "usd", textContent: i.approx_usd ? `$${Number(i.approx_usd).toFixed(0)}` : "" })
+  )) : [el("tr", {}, el("td", { className: "empty", textContent: "Nothing to buy for the next step." }))]));
+  const total = items.reduce((sum, i) => sum + (Number(i.approx_usd) || 0), 0);
+  $("total").replaceChildren(...(total ? [el("div", { className: "total" }, el("span", { textContent: "Kit total, approx." }), el("span", { textContent: `$${total.toFixed(0)}` }))] : []));
+}
+
+async function writeSpec() {
+  setBusy(true, "Writing the spec from every shot…");
+  const out = $("spec");
+  out.textContent = "";
+  out.className = "text streaming";
+  try {
+    const res = await api(`/api/guide/${sessionId}/spec`, { method: "POST" });
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split("\n\n");
+      buffer = events.pop();
+      for (const raw of events) {
+        if (!raw.startsWith("data: ")) continue;
+        const ev = JSON.parse(raw.slice(6));
+        if (ev.kind === "token") out.textContent += ev.text;
+        if (ev.kind === "error") throw new Error(ev.message);
+      }
+    }
+    renderMarkdown(out);
+    setBusy(false, "Spec written.");
+  } catch (e) {
+    setBusy(false, `The spec stopped: ${e.message}`, true);
+  }
+}
+
+function renderMarkdown(target) {
+  const inline = (s) => {
+    const span = document.createElement("span");
+    s.split(/(`[^`]+`|\*\*[^*]+\*\*)/).forEach((piece) => {
+      if (piece.startsWith("`") && piece.endsWith("`") && piece.length > 1) span.append(el("code", { textContent: piece.slice(1, -1) }));
+      else if (piece.startsWith("**") && piece.endsWith("**")) span.append(el("strong", { textContent: piece.slice(2, -2) }));
+      else span.append(piece);
+    });
+    return span;
+  };
+  const out = [];
+  let list = null;
+  for (const raw of target.textContent.split("\n")) {
+    const line = raw.trimEnd();
+    const heading = line.match(/^(#{1,3})\s+(.*)/);
+    const item = line.match(/^\s*[*-]\s+(.*)/);
+    if (item) {
+      if (!list) out.push((list = document.createElement("ul")));
+      list.append(el("li", {}, inline(item[1])));
+      continue;
+    }
+    list = null;
+    if (heading) out.push(el("h" + (heading[1].length + 1), { textContent: heading[2] }));
+    else if (line) out.push(el("p", {}, inline(line)));
+  }
+  target.replaceChildren(...out);
+  target.className = "text";
+}
+</script>
+</body>
+</html>

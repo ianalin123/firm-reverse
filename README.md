@@ -4,7 +4,19 @@ An offline bench that reverse engineers a circuit board into a functional spec.
 Point a camera at the board, clip probes on its buses, and get a spec a design team can rebuild from.
 Gemma 4 runs on the device through LiteRT-LM. Nothing leaves the bench.
 
-## How it works
+## Camera only: the guided teardown (Gemini 4 Argon)
+
+No analyzer, no scanner, just a phone. Open the page, take the shot it asks for, send it. Each turn Argon looks at every photo and video so far, ties each claim to the shots that prove it, revises claims a new shot contradicts, and asks for the one shot that settles the weakest claim: flip the board, tilt to kill glare on a chip, film the LEDs while it boots. It also lists the cheap tools you need for the next step, and warns before anything dangerous. When the camera has nothing left to settle, it writes the clean-room spec.
+
+```fish
+echo "GEMINI_API_KEY=<event key>" > .env.local
+HOST=0.0.0.0 ALLOWED_HOSTS=(ipconfig getifaddr en0) uv run firm-reverse-serve
+# open http://<laptop-ip>:8000 on your phone
+```
+
+When a question needs a probe, the probe bench at `/bench` takes over with a logic analyzer capture.
+
+## How the probe bench works
 
 1. **Signals (deterministic).** A capture from a logic analyzer (Saleae Logic 2 or Digilent WaveForms CSV, or any VCD) is decoded in plain Python: NEC infrared (with carrier detection), I2C, UART with auto baud. The model never sees raw samples, only a few lines of summary.
 2. **Parts (Gemma vision).** Gemma reads chip markings from a board photo, then each marking is matched against a local datasheet library.
