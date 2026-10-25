@@ -135,6 +135,18 @@ def guide():
         return _guide
 
 
+def _evict_idle_session() -> None:
+    for victim, lock in list(_session_locks.items()):
+        if lock.acquire(blocking=False):
+            try:
+                shutil.rmtree(_sessions.pop(victim)[1], ignore_errors=True)
+                _session_locks.pop(victim, None)
+            finally:
+                lock.release()
+            return
+    raise HTTPException(503, "every session is busy; try again in a minute")
+
+
 def _session(session_id: str):
     if session_id not in _sessions:
         raise HTTPException(404, "unknown session; start a new one")
@@ -144,9 +156,7 @@ def _session(session_id: str):
 @app.post("/api/guide/session")
 def guide_session():
     if len(_sessions) >= MAX_SESSIONS:
-        oldest = next(iter(_sessions))
-        shutil.rmtree(_sessions.pop(oldest)[1], ignore_errors=True)
-        _session_locks.pop(oldest, None)
+        _evict_idle_session()
     session = guide().new_session()
     _sessions[session.id] = (session, Path(tempfile.mkdtemp()))
     _session_locks[session.id] = threading.Lock()
@@ -155,14 +165,28 @@ def guide_session():
 
 @app.post("/api/guide/{session_id}/shot")
 async def guide_shot(session_id: str, note: str = Form(""), media: UploadFile = File(...)):
+    from .guide import MAX_SHOTS
+
     session, directory = _session(session_id)
-    shot_dir = directory / str(len(session.shots) + 1)
-    shot_dir.mkdir(exist_ok=True)
-    path = await _save(media, shot_dir)
+    lock = _session_locks[session_id]
+    if len(session.shots) >= MAX_SHOTS:
+        raise HTTPException(422, f"a session holds at most {MAX_SHOTS} shots")
+    data = await media.read(MAX_UPLOAD_BYTES + 1)
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, f"{media.filename} is over {MAX_UPLOAD_BYTES // 2**20} MB")
+    suffix = Path(media.filename or "").suffix.lower()[:8]
 
     def work():
-        with _session_locks[session_id]:
-            shot = guide().add_shot(session, path, note)
+        with lock:
+            if session_id not in _sessions:
+                raise ValueError("session expired; start a new one")
+            path = directory / f"shot-{len(session.shots) + 1}{suffix}"
+            path.write_bytes(data)
+            try:
+                shot = guide().add_shot(session, path, note)
+            except Exception:
+                path.unlink(missing_ok=True)
+                raise
             return {"shot": shot.index, "turn": guide().step(session)}
 
     try:
@@ -176,11 +200,12 @@ async def guide_shot(session_id: str, note: str = Form(""), media: UploadFile = 
 @app.post("/api/guide/{session_id}/spec")
 def guide_spec(session_id: str):
     session, _ = _session(session_id)
+    lock = _session_locks[session_id]
     events: queue.Queue = queue.Queue()
 
     def work():
         try:
-            with _session_locks[session_id]:
+            with lock:
                 for text in guide().stream_spec(session):
                     events.put(json.dumps({"kind": "token", "text": text}))
             events.put(json.dumps({"kind": "done"}))
