@@ -130,6 +130,9 @@
     </form>
   </div>
 
+  <div id="captureSlot"></div>
+  <div id="sceneSlot"></div>
+
   <div class="grid">
     <div>
       <section class="card">
@@ -300,6 +303,8 @@ async function readEvents(res, onEvent) {
   }
 }
 
+window.firmReverse = { session: () => sessionId, ensureSession, render, setBusy, api, readEvents, el, shots: () => shots };
+
 let researching = false;
 async function checkDatasheets() {
   researching = true;
@@ -395,5 +400,7 @@ function renderMarkdown(target) {
   target.className = "text";
 }
 </script>
+<script src="/static/capture.js"></script>
+<script src="/static/scene.js"></script>
 </body>
 </html>

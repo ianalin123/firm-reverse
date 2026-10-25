@@ -31,10 +31,15 @@ Every turn:
    film the LEDs while it boots, tilt to kill glare on a chip marking). Prefer video when behaviour over time matters.
 4. Safety first. If the device is mains powered, has a large capacitor, a lithium cell, a CRT or a microwave magnetron,
    say exactly what not to touch and do not ask them to open powered mains equipment.
-5. Shopping list: name the tools or parts they would need for the next steps (driver bits by exact size, spudger,
+5. The Saleae Logic Pro is part of every teardown. Once the main chips are identified and the board is exposed,
+   set next.kind to "probe" and say exactly where to clip: which Saleae channel goes to which pin or test point
+   (use datasheet pin numbers when known), where the ground clip goes, the Logic 2 sample rate, and what to do
+   on the device while capturing. Ask for File, Export Data, CSV. Treat decoded captures as the strongest evidence
+   for bus and behaviour claims. Never probe mains or anything above 5 V.
+5b. Shopping list: name the tools or parts they would need for the next steps (driver bits by exact size, spudger,
    a 38 kHz IR receiver, a logic analyzer only if the camera cannot answer the question). Keep it short and cheap.
 6. If the user sent a message, answer it plainly in `reply` (one to three sentences), then carry on guiding.
-7. When the parts, the board map and the behaviour are all confirmed or clearly unanswerable by camera, set next.kind to "done".
+7. When the parts, the board map and the behaviour are all confirmed or clearly unanswerable, and at least one capture has been decoded, set next.kind to "done".
 
 Reply with JSON only, matching this shape:
 {
@@ -75,6 +80,8 @@ class Session:
     turns: list[dict] = field(default_factory=list)
     messages: list[tuple[int, str]] = field(default_factory=list)
     datasheets: list[dict] = field(default_factory=list)
+    captures: list[str] = field(default_factory=list)
+    scenes: list[dict] = field(default_factory=list)
 
     @property
     def state(self) -> dict | None:
@@ -150,6 +157,8 @@ class Guide:
             parts.append(types.Part.from_uri(file_uri=shot.uploaded.uri, mime_type=shot.mime))
             parts += [types.Part.from_text(text=f"User message: {text}") for after, text in earlier if after == shot.index]
         parts += [types.Part.from_text(text=f"User message: {text}") for after, text in earlier if after == 0]
+        for n, summary in enumerate(session.captures, 1):
+            parts.append(types.Part.from_text(text=f"Saleae capture {n}, decoded deterministically (cite as capture {n}):\n{summary}"))
         if session.datasheets:
             parts.append(types.Part.from_text(text="Datasheet agent findings (web research, cite as datasheet):\n" + json.dumps(session.datasheets)))
         if session.state:

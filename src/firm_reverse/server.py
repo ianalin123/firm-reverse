@@ -12,6 +12,7 @@ import shutil
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -28,6 +29,7 @@ ALLOWED_HOSTS = ["localhost", "127.0.0.1", "*.local", "testserver"] + [
 
 app = FastAPI()
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
+app.mount("/static", StaticFiles(directory=STATIC), name="static")
 _gemma = None
 _gemma_lock = threading.Lock()
 
@@ -349,6 +351,13 @@ async def run(summary: str = Form(""), close_up: bool = Form(True), photos: list
             yield f"data: {item}\n\n"
 
     return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+from .capture_api import router as capture_router  # noqa: E402
+from .scene_api import router as scene_router  # noqa: E402
+
+app.include_router(capture_router)
+app.include_router(scene_router)
 
 
 def main() -> None:
