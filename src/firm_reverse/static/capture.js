@@ -7,18 +7,25 @@
   const style = document.createElement("style");
   style.textContent = `
     .capture-fits { color: #1d6b3d; font-weight: 700; }
-    .capture-mismatch { color: var(--fault, #c23b22); font-weight: 700; }
-    .capture-card h2 { font-size: 16px; margin: 0 0 4px; }
-    .capture-card .hint { font-size: 13.5px; color: var(--muted); margin: 0 0 10px; }
+    .capture-mismatch { color: #b3261e; font-weight: 700; }
+    .capture-card { position: relative; padding-left: 26px; }
+    .capture-card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 10px; border-radius: 2px 0 0 2px;
+      background: linear-gradient(#17201c 0 12.5%, #7a4a1e 12.5% 25%, #c62828 25% 37.5%, #e8780c 37.5% 50%, #e9c400 50% 62.5%, #2e9b4f 62.5% 75%, #1f63c9 75% 87.5%, #7b3fb8 87.5%); }
+    .capture-card h2 { margin-left: -26px; padding-left: 26px; }
+    .capture-card .hint { font-size: 15.5px; color: var(--muted); margin: 0 0 12px; max-width: 64ch; }
     .capture-card form { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; }
-    .capture-card input[type=file] { font: 13px var(--mono); flex: 1 1 220px; min-width: 0; align-self: center; }
-    .capture-card input[type=text] { flex: 1 1 200px; min-height: 46px; }
-    .capture-card button { min-height: 46px; }
-    .capture-card pre { font: 12.5px/1.45 var(--mono); background: var(--paper); border: 1px solid var(--rule); border-radius: 6px; padding: 8px 10px; margin: 10px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; }
+    .capture-card input[type=file] { font: 500 15px var(--sans); flex: 1 1 220px; min-width: 0; align-self: center; }
+    .capture-card input[type=file]::file-selector-button { font: 700 16px var(--cond); background: var(--panel); color: var(--ink); border: 2px solid var(--ink); border-radius: 4px; padding: 8px 14px; margin-right: 10px; cursor: pointer; }
+    .capture-card input[type=file]:focus-visible { outline: 3px solid var(--trace); outline-offset: 3px; }
+    .capture-card input[type=text] { flex: 1 1 200px; min-height: 50px; }
+    .capture-card button { min-height: 50px; }
+    .capture-card pre { font: 500 13px/1.5 var(--mono); background: #f2f5ef; color: var(--ink); border: 1px solid var(--rule); border-left: 4px solid var(--good); border-radius: 2px; padding: 10px 12px; margin: 10px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; }
     .capture-card pre:empty { display: none; }
-    .capture-card .capture-head { font: 600 12px var(--mono); color: var(--trace); margin-top: 10px; }
-    .capture-card.probe-now { border: 2px solid var(--trace); box-shadow: 0 0 0 4px color-mix(in srgb, var(--trace) 15%, transparent); }
-    .capture-card.probe-now h2::after { content: "  now"; font: 600 12px var(--mono); color: var(--trace); }
+    .capture-card .capture-head { font: 700 17px var(--cond); color: var(--good); margin-top: 12px; }
+    .capture-card .capture-head:empty { display: none; }
+    .capture-card.probe-now { border-color: var(--mask); outline: 4px solid var(--pad); outline-offset: 0; }
+    .capture-card.probe-now h2 { background: var(--mask); color: var(--silk); }
+    .capture-card.probe-now h2::after { content: "Do this now"; margin-left: 12px; font: 700 15px/1 var(--cond); color: var(--mask-deep); background: var(--pad); padding: 4px 8px 3px; border-radius: 2px; vertical-align: 3px; }
   `;
   document.head.append(style);
 

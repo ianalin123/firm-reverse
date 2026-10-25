@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from .access import AccessCodeMiddleware
 from .analyze import Finding, analyze, summarize
 from .loaders import load
 from .signals import Channel
@@ -29,6 +30,7 @@ ALLOWED_HOSTS = ["localhost", "127.0.0.1", "*.local", "testserver"] + [
 
 app = FastAPI()
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
+app.add_middleware(AccessCodeMiddleware)
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 _gemma = None
 _gemma_lock = threading.Lock()
