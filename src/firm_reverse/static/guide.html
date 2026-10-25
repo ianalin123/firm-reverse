@@ -45,6 +45,23 @@
   header a:hover { color: var(--trace); }
   a:focus-visible { outline: 3px solid var(--trace); outline-offset: 3px; border-radius: 2px; }
 
+  .intro { margin: 0 0 14px; }
+  .strap { margin: 0 0 12px; font: 600 clamp(20px, 2.3vw, 27px)/1.2 var(--cond); letter-spacing: 0.005em; max-width: 46ch; color: var(--ink); }
+  .strap span { color: var(--mask); }
+  .steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); background: var(--panel); border: 2px solid var(--ink); border-radius: 4px; counter-reset: step; }
+  .steps li { counter-increment: step; display: grid; grid-template-columns: 28px 1fr; gap: 4px 10px; padding: 12px 16px 13px; border-left: 1px solid var(--rule); min-width: 0; align-content: start; }
+  .steps li:first-child { border-left: 0; }
+  .steps li::before { content: counter(step); grid-row: 1 / span 2; width: 28px; height: 28px; border-radius: 50%; background: var(--pad); color: var(--ink); font: 700 15px/28px var(--cond); text-align: center; box-shadow: 0 0 0 2px var(--ink); margin-top: 1px; }
+  .steps b { font: 700 19px/1.3 var(--cond); letter-spacing: 0.01em; }
+  .steps p { margin: 0; font-size: 15px; line-height: 1.4; color: var(--muted); grid-column: 2; }
+  .coda { margin: 8px 0 0; font: 500 14.5px/1.4 var(--sans); color: var(--muted); padding-left: 12px; border-left: 2px solid var(--pad); }
+  body:has(#film figure) .strap, body:has(#film figure) .coda, body:has(#film figure) .steps p { display: none; }
+  body:has(#film figure) .intro { margin-bottom: 10px; }
+  body:has(#film figure) .steps { display: flex; flex-wrap: wrap; border-width: 0 0 1px; border-color: var(--rule); border-radius: 0; background: transparent; gap: 0 22px; }
+  body:has(#film figure) .steps li { padding: 0 0 6px; border-left: 0; grid-template-columns: 20px auto; align-items: center; gap: 8px; }
+  body:has(#film figure) .steps li::before { width: 20px; height: 20px; font-size: 12px; line-height: 20px; grid-row: auto; margin-top: 0; }
+  body:has(#film figure) .steps b { font-size: 16px; }
+
   .ask {
     position: relative; margin: 0 0 14px; padding: 26px 30px 26px;
     background: var(--mask); color: var(--silk); border-radius: 6px;
@@ -158,6 +175,11 @@
     .shoot { grid-template-columns: 1fr 1fr; }
     .shoot input[type=text] { grid-column: 1 / -1; grid-row: 1; min-height: 50px; }
     .ask { padding: 22px 18px 20px; margin-left: -4px; margin-right: -4px; }
+    .strap { font-size: 19px; }
+    .steps { grid-template-columns: 1fr; }
+    .steps li { border-left: 0; border-top: 1px solid var(--rule); padding: 10px 14px 11px; }
+    .steps li:first-child { border-top: 0; }
+    body:has(#film figure) .steps li { border-top: 0; }
     ul.claims li { grid-template-columns: 1fr; gap: 4px; }
     ul.claims li .pill { justify-self: start; }
   }
@@ -170,8 +192,17 @@
 <div class="wrap">
   <header>
     <h1>Firm Reverse</h1>
-    <a href="/bench">Have a logic analyzer? Open the probe bench</a>
   </header>
+
+  <div class="intro">
+    <p class="strap">Hypothesize, verify, revise. <span>A phone, one logic analyzer and a model that checks its own work.</span></p>
+    <ol class="steps">
+      <li><b>Camera</b><p>Every claim cites the shot that proves it.</p></li>
+      <li><b>Probe</b><p>The guide says which Saleae channel goes on which pin. The capture is decoded, then checked against the device.</p></li>
+      <li><b>Rebuild</b><p>Argon builds the device in 3D, renders it, compares it with your shots and fixes what is wrong.</p></li>
+    </ol>
+    <p class="coda">Ends with a clean room spec. Never copies firmware.</p>
+  </div>
 
   <div class="ask" aria-live="polite">
     <div class="kind" id="kind">first shot</div>
