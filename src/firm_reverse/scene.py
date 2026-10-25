@@ -67,10 +67,14 @@ def render(html: str, views: tuple[str, ...] = VIEWS) -> dict[str, bytes]:
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(args=["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"])
+        browser = p.chromium.launch(
+            chromium_sandbox=True,
+            args=["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"],
+        )
         try:
             page = browser.new_page(viewport={"width": 900, "height": 640})
             page.route("**/*", _only_cdn)
+            page.route_web_socket("**/*", lambda ws: ws.close())
             errors: list[str] = []
             page.on("pageerror", lambda e: errors.append(str(e)))
             page.set_content(html, wait_until="load")
