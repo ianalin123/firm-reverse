@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>M5Stack CoreS3 SE - 3D Reconstruction</title>
+<style>
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #f3f6f7; font-family: system-ui, -apple-system, sans-serif; }
+  #canvas-container { width: 100%; height: 100%; }
+  #ui-overlay {
+    position: absolute; top: 14px; left: 14px; z-index: 10;
+    background: rgba(255, 255, 255, 0.92); backdrop-filter: blur(6px);
+    padding: 12px 16px; border-radius: 10px; box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+    max-width: 280px; font-size: 12px; color: #1e293b; border: 1px solid #e2e8f0;
+  }
+  #ui-overlay h2 { margin: 0 0 6px 0; font-size: 14px; color: #0f172a; }
+  #ui-overlay .control-row { display: flex; align-items: center; gap: 8px; margin: 8px 0 10px 0; font-weight: 600; }
+  #ui-overlay input[type="range"] { flex: 1; cursor: pointer; }
+  #ui-overlay ul { margin: 6px 0 0 0; padding-left: 16px; max-height: 220px; overflow-y: auto; line-height: 1.45; }
+  #ui-overlay li strong { color: #0284c7; }
+</style>
+<script type="importmap">{"imports": {"three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+</head>
+<body>
+<div id="ui-overlay">
+  <h2>M5Stack CoreS3 SE (54×54×16 mm)</h2>
+  <div class="control-row">
+    <label for="explode">Explode:</label>
+    <input id="explode" type="range" min="0" max="1" step="0.01" value="0" />
+  </div>
+  <div><strong>Identified Parts:</strong></div>
+  <ul>
+    <li><strong>DISP1:</strong> 2.0" IPS LCD (ILI9342C) + Touch</li>
+    <li><strong>J1:</strong> 30-pin (2×15) M-Bus Header</li>
+    <li><strong>J2:</strong> USB Type-C Receptacle</li>
+    <li><strong>J3:</strong> Red 4-pin Grove Port A (I2C)</li>
+    <li><strong>J4:</strong> MicroSD Card Slot (SPI)</li>
+    <li><strong>SW1:</strong> Bottom Power / Boot Button (G)</li>
+    <li><strong>SW2:</strong> Side Tactile Reset Button</li>
+    <li><strong>U1:</strong> ESP32-S3-WROOM-1 MCU</li>
+    <li><strong>U2:</strong> AXP2101 Power Mgmt IC</li>
+    <li><strong>U3:</strong> AW9523B I2C GPIO Expander</li>
+  </ul>
+</div>
+<div id="canvas-container"></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const container = document.getElementById('canvas-container');
+const uiOverlay = document.getElementById('ui-overlay');
+const explodeSlider = document.getElementById('explode');
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xf3f6f7);
+
+const camera = new THREE.PerspectiveCamera(38, window.innerWidth / window.innerHeight, 1, 1000);
+camera.position.set(68, 62, 78);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+container.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.target.set(0, 0, 0);
+
+// Soft lighting
+const ambientLight = new THREE.AmbientLight(0xffffff, 1.35);
+scene.add(ambientLight);
+
+const keyLight = new THREE.DirectionalLight(0xffffff, 1.4);
+keyLight.position.set(70, 120, 90);
+scene.add(keyLight);
+
+const fillLight = new THREE.DirectionalLight(0xeef4ff, 0.9);
+fillLight.position.set(-80, -70, -60);
+scene.add(fillLight);
+
+const sideLight = new THREE.DirectionalLight(0xffffff, 0.7);
+sideLight.position.set(-40, 40, 100);
+scene.add(sideLight);
+
+// Helper: Rounded rectangle Shape centered at (0,0)
+function makeRoundedRectShape(w, h, r) {
+  const s = new THREE.Shape();
+  const hw = w / 2, hh = h / 2;
+  s.moveTo(-hw + r, -hh);
+  s.lineTo(hw - r, -hh);
+  s.quadraticCurveTo(hw, -hh, hw, -hh + r);
+  s.lineTo(hw, hh - r);
+  s.quadraticCurveTo(hw, hh, hw - r, hh);
+  s.lineTo(-hw + r, hh);
+  s.quadraticCurveTo(-hw, hh, -hw, hh - r);
+  s.lineTo(-hw, -hh + r);
+  s.quadraticCurveTo(-hw, -hh, -hw + r, -hh);
+  return s;
+}
+
+// Helper: Extruded rounded plate lying in XZ plane, centered vertically on Y
+function makeRoundedPlateXZ(w, d, thickness, r, material, holeRects = []) {
+  const shape = makeRoundedRectShape(w, d, r);
+  for (const hr of holeRects) {
+    const hole = new THREE.Path();
+    const x0 = hr.x - hr.w / 2, x1 = hr.x + hr.w / 2;
+    const z0 = -(hr.z + hr.d / 2), z1 = -(hr.z - hr.d / 2);
+    hole.moveTo(x0, z0);
+    hole.lineTo(x1, z0);
+    hole.lineTo(x1, z1);
+    hole.lineTo(x0, z1);
+    hole.ClosePath;
+    shape.holes.push(hole);
+  }
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: thickness, bevelEnabled: false, curveSegments: 24 });
+  geo.rotateX(-Math.PI / 2);
+  geo.translate(0, -thickness / 2, 0);
+  return new THREE.Mesh(geo, material);
+}
+
+// Groups for explode animation along Y
+const topCoverGroup = new THREE.Group();
+topCoverGroup.name = 'DISP1_TopGroup';
+const midShellGroup = new THREE.Group();
+midShellGroup.name = 'Enclosure_MidShell';
+const pcbGroup = new THREE.Group();
+pcbGroup.name = 'PCB_Assembly';
+const bottomPlateGroup = new THREE.Group();
+bottomPlateGroup.name = 'Enclosure_BottomPlate';
+
+scene.add(topCoverGroup, midShellGroup, pcbGroup, bottomPlateGroup);
+
+// Dimensions: 54 x 54 mm footprint, total thickness ~ 16 mm
+const W = 54, D = 54, R = 5.0;
+
+// -------------------------------------------------------------------
+// 1. FRONT DISPLAY BEZEL & SCREEN (DISP1) - Shot 1
+// -------------------------------------------------------------------
+function createScreenTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1024;
+  canvas.height = 1024;
+  const ctx = canvas.getContext('2d');
+
+  // Outer glossy dark bezel
+  ctx.fillStyle = '#14171a';
+  ctx.fillRect(0, 0, 1024, 1024);
+
+  // Subtle inner bezel reflection border
+  ctx.strokeStyle = '#333942';
+  ctx.lineWidth = 8;
+  ctx.strokeRect(16, 16, 992, 992);
+
+  // Backlit active 2.0" LCD window (matches Shot 1 dark bluish-grey glow)
+  const lcdX = 148, lcdY = 128, lcdW = 685, lcdH = 768;
+  const grad = ctx.createRadialGradient(
+    lcdX + lcdW * 0.52, lcdY + lcdH * 0.5, 30,
+    lcdX + lcdW * 0.5, lcdY + lcdH * 0.5, 480
+  );
+  grad.addColorStop(0, '#223047');
+  grad.addColorStop(0.65, '#172234');
+  grad.addColorStop(1, '#101826');
+  ctx.fillStyle = grad;
+  ctx.fillRect(lcdX, lcdY, lcdW, lcdH);
+
+  // Thin crisp border around active LCD panel
+  ctx.strokeStyle = '#1e2b3c';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(lcdX, lcdY, lcdW, lcdH);
+
+  // Vertical "SD Card Error!" text centered in LCD (rotated -90 deg as in Shot 1)
+  ctx.save();
+  ctx.translate(lcdX + lcdW * 0.49, lcdY + lcdH * 0.50);
+  ctx.rotate(-Math.PI / 2);
+  ctx.font = 'bold 34px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(190, 225, 255, 0.9)';
+  ctx.shadowBlur = 8;
+  ctx.fillStyle = '#f1f7ff';
+  ctx.fillText('SD Card Error!', 0, 0);
+  ctx.restore();
+
+  // Right bezel orange capacitive touch ring (Shot 1 right side near middle-bottom)
+  const ringX = 918, ringY = 582;
+  ctx.beginPath();
+  ctx.arc(ringX, ringY, 31, 0, Math.PI * 2);
+  ctx.strokeStyle = '#e0531c';
+  ctx.lineWidth = 8;
+  ctx.stroke();
+
+  // Inner dark dot inside orange ring
+  ctx.beginPath();
+  ctx.arc(ringX, ringY, 18, 0, Math.PI * 2);
+  ctx.fillStyle = '#0c0e10';
+  ctx.fill();
+
+  // Three small sensor/mic circles on the right bezel (Shot 1)
+  ctx.fillStyle = '#252a30';
+  ctx.strokeStyle = '#333940';
+  ctx.lineWidth = 2;
+  for (const sy of [330, 395, 815]) {
+    ctx.beginPath();
+    ctx.arc(918, sy, 10, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  return tex;
+}
+
+// Metallic grey plastic bezel rim around the front glass (Shot 1)
+const bezelRimMat = new THREE.MeshStandardMaterial({ color: 0x565b61, roughness: 0.42, metalness: 0.25 });
+const frontRim = makeRoundedPlateXZ(W, D, 1.2, R, bezelRimMat);
+frontRim.position.y = 7.4;
+topCoverGroup.add(frontRim);
+
+// Dark glass cover inset inside the 1 mm bezel lip
+const glassBodyMat = new THREE.MeshStandardMaterial({ color: 0x15181b, roughness: 0.2, metalness: 0.1 });
+const glassCover = makeRoundedPlateXZ(W - 2.2, D - 2.2, 0.8, R - 0.8, glassBodyMat);
+glassCover.name = 'DISP1';
+glassCover.position.y = 7.7;
+topCoverGroup.add(glassCover);
+
+// Textured screen face plane sitting cleanly on top of the glass cover (+Y face)
+const screenFaceGeo = new THREE.PlaneGeometry(W - 3.0, D - 3.0);
+screenFaceGeo.rotateX(-Math.PI / 2);
+const screenTex = createScreenTexture();
+const screenFaceMat = new THREE.MeshBasicMaterial({ map: screenTex });
+const screenFace = new THREE.Mesh(screenFaceGeo, screenFaceMat);
+screenFace.name = 'DISP1_ScreenFace';
+screenFace.position.y = 8.12;
+topCoverGroup.add(screenFace);
+
+// Small translucent peel tab on bottom-left bezel edge (Shot 1)
+const tabMat = new THREE.MeshStandardMaterial({
+  color: 0xe2e8f0,
+  transparent: true,
+  opacity: 0.55,
+  roughness: 0.35
+});
+const peelTab = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.16, 7.5), tabMat);
+peelTab.position.set(-W / 2 - 0.3, 8.05, 9.5);
+topCoverGroup.add(peelTab);
+
+// -------------------------------------------------------------------
+// 2. DARK GREY MIDDLE ENCLOSURE SHELL & SIDE PORTS (Shots 3 & 4)
+// -------------------------------------------------------------------
+const grayShellMat = new THREE.MeshStandardMaterial({ color: 0x454a50, roughness: 0.55, metalness: 0.12 });
+
+// Main dark grey body: Y from -4.8 to +6.8 (height 11.6 mm)
+const midShellMesh = makeRoundedPlateXZ(W, D, 11.6, R, grayShellMat);
+midShellMesh.name = 'Enclosure_Body';
+midShellMesh.position.y = 1.0;
+midShellGroup.add(midShellMesh);
+
+// --- BOTTOM EDGE (+Z = +27 mm): Shot 3 ---
+// In Shot 3, the yellow back is on the left (-Y) and screen is on the right (+Y).
+// From top to bottom along the edge in Shot 3 (which corresponds to -X to +X when viewed from +Z):
+// Left (-X): Power/Boot button marked "G"
+// Center (X=0): USB-C receptacle (vertical slot along Y)
+// Right (+X): Red 4-pin HY2.0-4P Grove connector, with - + wave wave markings between it and the front face (+Y)
+
+const sw1Group = new THREE.Group();
+sw1Group.name = 'SW1';
+const sw1BezelMat = new THREE.MeshStandardMaterial({ color: 0x22252a, roughness: 0.7 });
+const sw1CapMat = new THREE.MeshStandardMaterial({ color: 0x4e545b, roughness: 0.45 });
+
+// Recessed pocket around button
+const sw1Recess = new THREE.Mesh(new THREE.BoxGeometry(7.6, 5.2, 0.8), sw1BezelMat);
+sw1Recess.position.set(-12.5, 0.8, D / 2 - 0.25);
+sw1Group.add(sw1Recess);
+
+// Button cap with vertical ridge on the right
+const sw1Cap = new THREE.Mesh(new THREE.BoxGeometry(6.6, 4.4, 0.9), sw1CapMat);
+sw1Cap.position.set(-12.5, 0.8, D / 2 - 0.05);
+sw1Group.add(sw1Cap);
+
+const sw1Ridge = new THREE.Mesh(new THREE.BoxGeometry(1.1, 4.4, 1.15), new THREE.MeshStandardMaterial({ color: 0x626870, roughness: 0.4 }));
+sw1Ridge.position.set(-9.9, 0.8, D / 2);
+sw1Group.add(sw1Ridge);
+midShellGroup.add(sw1Group);
+
+// USB Type-C Port (J2) at center X = 0
+const j2Group = new THREE.Group();
+j2Group.name = 'J2';
+
+// Rounded capsule opening for USB-C (width 3.2 mm along Y, length 9.0 mm along X)
+const usbHoleShape = makeRoundedRectShape(8.8, 3.2, 1.5);
+const usbHoleGeo = new THREE.ExtrudeGeometry(usbHoleShape, { depth: 1.4, bevelEnabled: false, curveSegments: 16 });
+const usbCavityMat = new THREE.MeshStandardMaterial({ color: 0x101214, roughness: 0.8 });
+const usbCavity = new THREE.Mesh(usbHoleGeo, usbCavityMat);
+usbCavity.position.set(0, 0.6, D / 2 - 1.2);
+j2Group.add(usbCavity);
+
+// Metallic inner shield rim
+const usbRimShape = makeRoundedRectShape(8.3, 2.7, 1.25);
+const usbInnerHole = makeRoundedRectShape(7.7, 2.1, 0.95);
+usbRimShape.holes.push(usbInnerHole);
+const usbShieldGeo = new THREE.ExtrudeGeometry(usbRimShape, { depth: 1.2, bevelEnabled: false, curveSegments: 16 });
+const usbShieldMat = new THREE.MeshStandardMaterial({ color: 0x9aa2ac, metalness: 0.8, roughness: 0.25 });
+const usbShield = new THREE.Mesh(usbShieldGeo, usbShieldMat);
+usbShield.position.set(0, 0.6, D / 2 - 1.15);
+j2Group.add(usbShield);
+
+// Center USB-C tongue
+const usbTongue = new THREE.Mesh(new THREE.BoxGeometry(6.2, 0.6, 1.1), new THREE.MeshStandardMaterial({ color: 0x2c3036, metalness: 0.4 }));
+usbTongue.position.set(0, 0.6, D / 2 - 0.5);
+j2Group.add(usbTongue);
+midShellGroup.add(j2Group);
+
+// Red 4-pin Grove Port A (J3) on the right (+X = +13.5 mm)
+const j3Group = new THREE.Group();
+j3Group.name = 'J3';
+const redGroveMat = new THREE.MeshStandardMaterial({ color: 0x7b1d26, roughness: 0.42 });
+
+// Outer red shroud
+const groveOuter = new THREE.Mesh(new THREE.BoxGeometry(9.8, 4.8, 1.4), redGroveMat);
+groveOuter.position.set(13.5, -0.3, D / 2 - 0.55);
+j3Group.add(groveOuter);
+
+// Dark interior recess inside red shroud
+const groveInner = new THREE.Mesh(new THREE.BoxGeometry(8.2, 3.3, 1.2), new THREE.MeshStandardMaterial({ color: 0x2c080c, roughness: 0.7 }));
+groveInner.position.set(13.5, -0.3, D / 2 - 0.35);
+j3Group.add(groveInner);
+
+// 4 gold contact pins inside Grove port
+const pinMat = new THREE.MeshStandardMaterial({ color: 0xdfb15b, metalness: 0.85, roughness: 0.2 });
+for (let i = 0; i < 4; i++) {
+  const px = 13.5 + (i - 1.5) * 2.0;
+  const pin = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.48, 1.3), pinMat);
+  pin.position.set(px, -0.3, D / 2 - 0.35);
+  j3Group.add(pin);
+}
+midShellGroup.add(j3Group);
+
+// Molded icons on Bottom Edge (+Z): "G" next to button, and "- + [wave] [wave]" above Grove port towards front (+Y)
+function createBottomWallDecal() {
+  const c = document.createElement('canvas');
+  c.width = 1024;
+  c.height = 256;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, 1024, 256);
+
+  ctx.fillStyle = '#262a2e';
+  ctx.strokeStyle = '#262a2e';
+
+  // Power / "G" icon towards +Y (top of wall) above SW1 button (X = -12.5 -> u ~ 256)
+  ctx.font = 'bold 42px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('G', 250, 42);
+
+  // Grove markings "- + [square-wave] [square-wave]" above the red Grove port (+Y side, X = +13.5 -> u ~ 760)
+  ctx.font = 'bold 30px monospace';
+  const gx = [692, 740, 788, 836];
+  ctx.fillText('-', gx[0], 54);
+  ctx.fillText('+', gx[1], 54);
+  ctx.fillText('⎍', gx[2], 54);
+  ctx.fillText('⎍', gx[3], 54);
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const bottomDecalPlane = new THREE.Mesh(
+  new THREE.PlaneGeometry(48, 11.2),
+  new THREE.MeshBasicMaterial({ map: createBottomWallDecal(), transparent: true })
+);
+bottomDecalPlane.position.set(0, 1.0, D / 2 + 0.04);
+midShellGroup.add(bottomDecalPlane);
+
+// --- LEFT SIDE EDGE (-X = -27 mm): Shot 4 ---
+// MicroSD slot (J4), pinhole LED + 2 small oval slots, and recessed reset button (SW2)
+const j4Group = new THREE.Group();
+j4Group.name = 'J4';
+
+// Thumb fingernail scoop depression around microSD slot
+const scoopGeo = new THREE.CylinderGeometry(4.5, 4.5, 0.7, 24);
+scoopGeo.rotateZ(Math.PI / 2);
+const scoopMesh = new THREE.Mesh(scoopGeo, new THREE.MeshStandardMaterial({ color: 0x3b4046, roughness: 0.6 }));
+scoopMesh.position.set(-W / 2 + 0.15, 1.2, -7.5);
+j4Group.add(scoopMesh);
+
+// MicroSD slot opening (15 mm long along Z, 1.4 mm wide along Y)
+const sdSlotMesh = new THREE.Mesh(
+  new THREE.BoxGeometry(1.2, 1.4, 15.0),
+  new THREE.MeshStandardMaterial({ color: 0x101214, roughness: 0.85 })
+);
+sdSlotMesh.position.set(-W / 2 + 0.35, 1.2, -7.5);
+j4Group.add(sdSlotMesh);
+midShellGroup.add(j4Group);
+
+// Pinhole LED and two small horizontal lanyard/vent slots (Shot 4)
+const holeMat = new THREE.MeshStandardMaterial({ color: 0x121417, roughness: 0.85 });
+const ledHole = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.65, 1.0, 16), holeMat);
+ledHole.rotation.z = Math.PI / 2;
+ledHole.position.set(-W / 2 + 0.35, 1.5, 6.2);
+midShellGroup.add(ledHole);
+
+for (const zOff of [5.4, 7.2]) {
+  const ventSlot = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.85, 3.4), holeMat);
+  ventSlot.position.set(-W / 2 + 0.35, -1.6, zOff);
+  midShellGroup.add(ventSlot);
+}
+
+// Recessed tactile Reset Button (SW2) with circular reset icon (Shot 4)
+const sw2Group = new THREE.Group();
+sw2Group.name = 'SW2';
+
+const sw2WellShape = makeRoundedRectShape(7.6, 5.2, 2.4);
+const sw2WellGeo = new THREE.ExtrudeGeometry(sw2WellShape, { depth: 1.0, bevelEnabled: false, curveSegments: 16 });
+sw2WellGeo.rotateY(-Math.PI / 2);
+const sw2Well = new THREE.Mesh(sw2WellGeo, new THREE.MeshStandardMaterial({ color: 0x1b1e22, roughness: 0.75 }));
+sw2Well.position.set(-W / 2 + 0.8, 0.2, 14.5);
+sw2Group.add(sw2Well);
+
+const sw2CapShape = makeRoundedRectShape(6.2, 4.1, 1.8);
+const sw2CapGeo = new THREE.ExtrudeGeometry(sw2CapShape, { depth: 0.9, bevelEnabled: false, curveSegments: 16 });
+sw2CapGeo.rotateY(-Math.PI / 2);
+const sw2Cap = new THREE.Mesh(sw2CapGeo, new THREE.MeshStandardMaterial({ color: 0x525860, roughness: 0.45 }));
+sw2Cap.position.set(-W / 2 + 0.65, 0.2, 14.5);
+sw2Group.add(sw2Cap);
+midShellGroup.add(sw2Group);
+
+// Circular reset arrow icon molded next to SW2 on -X wall
+function createSideResetDecal() {
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 128;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, 128, 128);
+  ctx.strokeStyle = '#282c31';
+  ctx.lineWidth = 10;
+  ctx.beginPath();
+  ctx.arc(64, 64, 34, 0.3, Math.PI * 1.75);
+  ctx.stroke();
+  ctx.fillStyle = '#282c31';
+  ctx.beginPath();
+  ctx.moveTo(88, 24);
+  ctx.lineTo(108, 44);
+  ctx.lineTo(78, 48);
+  ctx.closePath();
+  ctx.fill();
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const resetDecalMesh = new THREE.Mesh(
+  new THREE.PlaneGeometry(3.4, 3.4),
+  new THREE.MeshBasicMaterial({ map: createSideResetDecal(), transparent: true })
+);
+resetDecalMesh.rotation.y = -Math.PI / 2;
+resetDecalMesh.position.set(-W / 2 - 0.04, 0.2, 20.4);
+midShellGroup.add(resetDecalMesh);
+
+// -------------------------------------------------------------------
+// 3. INTERNAL PCB ASSEMBLY & IDENTIFIED CHIPS (Revealed on Explode)
+// -------------------------------------------------------------------
+const pcbMat = new THREE.MeshStandardMaterial({ color: 0xd98c2b, roughness: 0.5, metalness: 0.1 });
+const pcbBoard = makeRoundedPlateXZ(48.0, 48.0, 1.4, 3.0, pcbMat);
+pcbBoard.name = 'PCB';
+pcbBoard.position.y = -1.2;
+pcbGroup.add(pcbBoard);
+
+// Helper to create IC packages with top canvas marking texture
+function makeMarkedIC(ref, marking, w, h, d, x, y, z, shieldMetal = false) {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 256;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = shieldMetal ? '#b8c0c8' : '#1b1e23';
+  ctx.fillRect(0, 0, 256, 256);
+  ctx.strokeStyle = shieldMetal ? '#8a949e' : '#333842';
+  ctx.lineWidth = 6;
+  ctx.strokeRect(8, 8, 240, 240);
+
+  ctx.fillStyle = shieldMetal ? '#1e293b' : '#e2e8f0';
+  ctx.font = 'bold 28px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const lines = marking.split('\n');
+  lines.forEach((line, idx) => {
+    ctx.fillText(line, 128, 128 + (idx - (lines.length - 1) / 2) * 34);
+  });
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+
+  const sideMat = new THREE.MeshStandardMaterial({
+    color: shieldMetal ? 0xb8c0c8 : 0x1b1e23,
+    metalness: shieldMetal ? 0.7 : 0.1,
+    roughness: shieldMetal ? 0.3 : 0.6
+  });
+  const topMat = new THREE.MeshStandardMaterial({
+    map: tex,
+    metalness: shieldMetal ? 0.5 : 0.1,
+    roughness: 0.4
+  });
+
+  const mesh = new THREE.Mesh(
+    new THREE.BoxGeometry(w, h, d),
+    [sideMat, sideMat, topMat, sideMat, sideMat, sideMat]
+  );
+  mesh.name = ref;
+  mesh.position.set(x, y, z);
+  return mesh;
+}
+
+// U1: ESP32-S3-WROOM-1 RF Module
+pcbGroup.add(makeMarkedIC('U1', 'ESP32-S3\nWROOM-1', 18.0, 2.4, 18.0, 4.5, 0.7, -4.0, true));
+// U2: AXP2101 PMIC (0x34)
+pcbGroup.add(makeMarkedIC('U2', 'AXP2101\nPMIC 0x34', 5.2, 1.0, 5.2, 4.0, 0.0, 12.0, false));
+// U3: AW9523B I2C IO Expander (0x58)
+pcbGroup.add(makeMarkedIC('U3', 'AW9523B\nIO 0x58', 4.2, 0.9, 4.2, 13.0, 0.0, 12.0, false));
+// Internal stainless microSD cage on PCB
+pcbGroup.add(makeMarkedIC('J4_InternalCage', 'microSD\nSPI SLOT', 14.5, 1.6, 15.0, -16.0, 0.3, -7.5, true));
+
+// -------------------------------------------------------------------
+// 4. YELLOW BOTTOM PLATE, STICKER & 30-PIN M-BUS HEADER (Shot 2)
+// -------------------------------------------------------------------
+const yellowCaseMat = new THREE.MeshStandardMaterial({ color: 0xdf9b27, roughness: 0.38, metalness: 0.08 });
+
+// Cutout for the 30-pin M-Bus header on the left side when viewed from the back
+// Viewed from the back (-Y looking towards +Y), left is -X.
+const mbusCutout = [{ x: -16.8, z: 0, w: 7.4, d: 39.2 }];
+const bottomPlate = makeRoundedPlateXZ(W, D, 2.4, R, yellowCaseMat, mbusCutout);
+bottomPlate.name = 'Enclosure_BackPlate';
+bottomPlate.position.y = -6.0;
+bottomPlateGroup.add(bottomPlate);
+
+// Inner yellow pocket around M-Bus socket & 6 via holes (3 top, 3 bottom on right side of socket as in Shot 2)
+const mbusFrameMat = new THREE.MeshStandardMaterial({ color: 0xc88619, roughness: 0.5 });
+const mbusInnerLedge = new THREE.Mesh(new THREE.BoxGeometry(2.6, 1.6, 39.2), mbusFrameMat);
+mbusInnerLedge.position.set(-12.2, -6.2, 0);
+bottomPlateGroup.add(mbusInnerLedge);
+
+const viaHoleMat = new THREE.MeshStandardMaterial({ color: 0x261604, roughness: 0.85 });
+for (const zPos of [-16.5, -14.0, -11.5, 11.5, 14.0, 16.5]) {
+  const viaHole = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.65, 1.9, 12), viaHoleMat);
+  viaHole.position.set(-12.2, -6.25, zPos);
+  bottomPlateGroup.add(viaHole);
+}
+
+// J1: 30-pin (2x15) M-Bus Female Expansion Socket (Shot 2)
+const j1Group = new THREE.Group();
+j1Group.name = 'J1';
+const headerHousingMat = new THREE.MeshStandardMaterial({ color: 0x16181c, roughness: 0.65 });
+const headerHousing = new THREE.Mesh(new THREE.BoxGeometry(5.2, 3.6, 38.2), headerHousingMat);
+headerHousing.position.set(-16.6, -5.3, 0);
+j1Group.add(headerHousing);
+
+// 2x15 = 30 individual square pin sockets + gold contacts inside
+const socketHoleMat = new THREE.MeshStandardMaterial({ color: 0x050608, roughness: 0.9 });
+for (let row = 0; row < 15; row++) {
+  const z = (row - 7) * 2.54;
+  for (let col = 0; col < 2; col++) {
+    const x = -16.6 + (col === 0 ? -1.27 : 1.27);
+    const hole = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.6, 1.3), socketHoleMat);
+    hole.position.set(x, -7.02, z);
+    j1Group.add(hole);
+
+    const contact = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.3, 0.55), pinMat);
+    contact.position.set(x, -7.12, z);
+    j1Group.add(contact);
+  }
+}
+bottomPlateGroup.add(j1Group);
+
+// 4 corner silver hex socket screws + 4 black circular rubber feet pads (Shot 2)
+const screwMetalMat = new THREE.MeshStandardMaterial({ color: 0xc4ccd4, metalness: 0.82, roughness: 0.25 });
+const hexHoleMat = new THREE.MeshStandardMaterial({ color: 0x2b3036, metalness: 0.5, roughness: 0.6 });
+const rubberFootMat = new THREE.MeshStandardMaterial({ color: 0x181a1d, roughness: 0.88 });
+
+const screwPositions = [
+  [-21.8, -21.8],
+  [21.8, -21.8],
+  [-21.8, 21.8],
+  [21.8, 21.8]
+];
+for (const [sx, sz] of screwPositions) {
+  const screwHead = new THREE.Mesh(new THREE.CylinderGeometry(2.35, 2.35, 0.4, 24), screwMetalMat);
+  screwHead.position.set(sx, -7.1, sz);
+  bottomPlateGroup.add(screwHead);
+
+  const hexSocket = new THREE.Mesh(new THREE.CylinderGeometry(1.15, 1.15, 0.45, 6), hexHoleMat);
+  hexSocket.position.set(sx, -7.14, sz);
+  bottomPlateGroup.add(hexSocket);
+}
+
+const footPositions = [
+  [-13.5, -22.2],
+  [14.8, -22.2],
+  [-13.5, 22.2],
+  [14.8, 22.2]
+];
+for (const [fx, fz] of footPositions) {
+  const foot = new THREE.Mesh(new THREE.CylinderGeometry(2.35, 2.35, 0.5, 24), rubberFootMat);
+  foot.position.set(fx, -7.18, fz);
+  bottomPlateGroup.add(foot);
+}
+
+// Center Rear Label Sticker: "CORES3/SE" + M5STACK cube logo (Shot 2)
+function createBackStickerTexture() {
+  const c = document.createElement('canvas');
+  c.width = 1024;
+  c.height = 1024;
+  const ctx = c.getContext('2d');
+
+  // Outer white sticker base
+  ctx.fillStyle = '#f8fafc';
+  ctx.fillRect(0, 0, 1024, 1024);
+
+  // Left vertical light-grey banner holding "CORES3/SE"
+  ctx.fillStyle = '#d3d7dd';
+  ctx.beginPath();
+  ctx.roundRect(36, 36, 515, 952, 48);
+  ctx.fill();
+
+  // Vertical text "CORES3/SE" rotated -90 deg (reads bottom-to-top in Shot 2)
+  ctx.save();
+  ctx.translate(305, 512);
+  ctx.rotate(-Math.PI / 2);
+  ctx.font = '900 132px "Arial Black", Impact, sans-serif';
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+
+  const p1 = 'CORE';
+  const p2 = 'S3';
+  const p3 = '/';
+  const p4 = 'SE';
+  const w1 = ctx.measureText(p1).width;
+  const w2 = ctx.measureText(p2).width;
+  const w3 = ctx.measureText(p3).width;
+  const w4 = ctx.measureText(p4).width;
+  let curX = -(w1 + w2 + w3 + w4) / 2;
+
+  ctx.fillStyle = '#1e2229';
+  ctx.fillText(p1, curX, 0);
+  curX += w1;
+
+  ctx.fillStyle = '#1d56b8';
+  ctx.fillText(p2, curX, 0);
+  curX += w2;
+
+  ctx.fillStyle = '#1e2229';
+  ctx.fillText(p3, curX, 0);
+  curX += w3;
+
+  ctx.fillStyle = '#d6282e';
+  ctx.fillText(p4, curX, 0);
+  ctx.restore();
+
+  // Right side: M5Stack isometric hexagon/cube logo + "M5STACK" vertical text
+  ctx.save();
+  ctx.translate(765, 512);
+  ctx.rotate(-Math.PI / 2);
+
+  // Isometric hexagon outline
+  ctx.strokeStyle = '#335c87';
+  ctx.lineWidth = 10;
+  ctx.beginPath();
+  const r = 68, cx = 0, cy = -38;
+  for (let i = 0; i < 6; i++) {
+    const ang = (i * Math.PI) / 3;
+    const vx = cx + r * Math.cos(ang);
+    const vy = cy + r * Math.sin(ang);
+    if (i === 0) ctx.moveTo(vx, vy);
+    else ctx.lineTo(vx, vy);
+  }
+  ctx.closePath();
+  ctx.stroke();
+
+  // Inner cube lines
+  ctx.beginPath();
+  ctx.moveTo(cx - r * 0.5, cy - r * 0.86);
+  ctx.lineTo(cx, cy);
+  ctx.lineTo(cx + r, cy);
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(cx - r * 0.5, cy + r * 0.86);
+  ctx.stroke();
+
+  ctx.fillStyle = '#22272e';
+  ctx.font = 'bold 42px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('M5STACK', 0, 82);
+  ctx.restore();
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  return tex;
+}
+
+const stickerShape = makeRoundedRectShape(32.5, 45.5, 3.0);
+// Cut small semicircular notches on top/bottom right corners of the sticker around the right rubber feet (as in Shot 2)
+const stickerGeo = new THREE.ShapeGeometry(stickerShape, 24);
+stickerGeo.rotateX(Math.PI / 2);
+const stickerMat = new THREE.MeshBasicMaterial({ map: createBackStickerTexture() });
+const stickerMesh = new THREE.Mesh(stickerGeo, stickerMat);
+stickerMesh.position.set(6.2, -7.23, 0);
+bottomPlateGroup.add(stickerMesh);
+
+// -------------------------------------------------------------------
+// Explode slider handler
+// -------------------------------------------------------------------
+function setExplode(val) {
+  const t = parseFloat(val) || 0;
+  topCoverGroup.position.y = t * 24;
+  midShellGroup.position.y = t * 7;
+  pcbGroup.position.y = -t * 7;
+  bottomPlateGroup.position.y = -t * 24;
+}
+explodeSlider.addEventListener('input', (e) => setExplode(e.target.value));
+
+// -------------------------------------------------------------------
+// Camera View Switcher required by inspection harness
+// -------------------------------------------------------------------
+window.setView = function (name) {
+  uiOverlay.style.display = 'none';
+  setExplode(0);
+  explodeSlider.value = '0';
+  controls.target.set(0, 0, 0);
+
+  if (name === 'front') {
+    // Looking straight down at the front screen (+Y face, Shot 1)
+    camera.up.set(0, 0, -1);
+    camera.position.set(0, 125, 0.01);
+  } else if (name === 'back') {
+    // Looking straight at the yellow rear plate (-Y face, Shot 2)
+    camera.up.set(0, 0, -1);
+    camera.position.set(0, -125, 0.01);
+  } else if (name === 'top') {
+    // Looking at the bottom/side connector edge
+    camera.up.set(0, 1, 0);
+    camera.position.set(0, 0, 125);
+  } else if (name === 'iso') {
+    // Isometric view showing front screen, left SD/Reset side (-X), and bottom USB/Grove edge (+Z)
+    camera.up.set(0, 1, 0);
+    camera.position.set(-74, 58, 74);
+  }
+  camera.lookAt(0, 0, 0);
+  controls.update();
+  renderer.render(scene, camera);
+};
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// Initial render & continuous loop
+controls.update();
+renderer.render(scene, camera);
+window.__ready = true;
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+</script>
+</body>
+</html>
