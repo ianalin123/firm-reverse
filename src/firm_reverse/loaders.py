@@ -1,7 +1,12 @@
-"""Load digital captures exported from Saleae Logic 2, Digilent WaveForms, or any VCD writer."""
+"""Load digital captures exported from Saleae Logic 2, Digilent WaveForms, sigrok/PulseView, or any VCD writer."""
 
+import configparser
 import csv
+import re
+import zipfile
 from pathlib import Path
+
+import numpy as np
 
 from .signals import Channel, Edge
 
@@ -12,8 +17,10 @@ def load(path: Path) -> list[Channel]:
             return load_csv(path)
         case ".vcd":
             return load_vcd(path)
+        case ".sr":
+            return load_sr(path)
         case _:
-            raise ValueError(f"unsupported capture format {path.suffix}; export CSV or VCD")
+            raise ValueError(f"unsupported capture format {path.suffix}; export CSV, VCD, or sigrok .sr")
 
 
 def load_csv(path: Path) -> list[Channel]:
@@ -66,6 +73,39 @@ def load_vcd(path: Path) -> list[Channel]:
                 series.append((t, level))
         i += 1
     return [Channel(ids[k], e + [(t, e[-1][1])]) for k, e in edges.items()]
+
+
+def load_sr(path: Path) -> list[Channel]:
+    """sigrok session file: a zip of an INI metadata file plus raw logic sample chunks."""
+    with zipfile.ZipFile(path) as z:
+        meta = configparser.ConfigParser()
+        meta.read_string(z.read("metadata").decode())
+        device = meta["device 1"]
+        prefix = device["capturefile"]
+        chunks = sorted(
+            (n for n in z.namelist() if n == prefix or n.startswith(prefix + "-")),
+            key=lambda n: 0 if n == prefix else int(n.rsplit("-", 1)[1]),
+        )
+        raw = b"".join(z.read(n) for n in chunks)
+    unitsize = int(device["unitsize"])
+    rate = _parse_samplerate(device["samplerate"])
+    samples = np.frombuffer(raw[: len(raw) - len(raw) % unitsize], dtype=f"<u{unitsize}")
+    probes = {int(k[5:]): v for k, v in device.items() if re.fullmatch(r"probe\d+", k)}
+    end = len(samples) / rate
+    channels = []
+    for index, name in sorted(probes.items()):
+        bits = ((samples >> (index - 1)) & 1).astype(np.int8)
+        changes = np.flatnonzero(np.diff(bits)) + 1
+        if not len(changes):
+            continue
+        edges = [(0.0, int(bits[0]))] + [(int(i) / rate, int(bits[i])) for i in changes]
+        channels.append(Channel(name, edges + [(end, edges[-1][1])]))
+    return channels
+
+
+def _parse_samplerate(text: str) -> float:
+    value, _, unit = text.strip().partition(" ")
+    return float(value) * {"": 1, "Hz": 1, "kHz": 1e3, "MHz": 1e6, "GHz": 1e9}[unit]
 
 
 def _parse_timescale(parts: list[str]) -> float:

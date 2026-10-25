@@ -54,5 +54,5 @@ def looks_like_clock(channel: Channel) -> float:
     if len(highs) < 16:
         return 0.0
     median = highs[len(highs) // 2]
-    tight = sum(1 for d in highs if abs(d - median) < median * 0.2)
+    tight = sum(1 for d in highs if abs(d - median) < median * 0.35)
     return tight / len(highs)

@@ -62,3 +62,25 @@ def test_uno_capture_rows_decode_as_nec(tmp_path):
     [d2, _] = load(path)
     [frame] = nec.decode(d2)
     assert frame.data["command"] == 0x08
+
+
+def test_sigrok_session_file(tmp_path):
+    import zipfile
+
+    import numpy as np
+
+    from firm_reverse.loaders import load
+
+    rate = 1_000_000
+    ir = synth.nec(0x40, 0x12)
+    end = ir.edges[-1][0]
+    samples = np.array([ir.level_at(i / rate) for i in range(int(end * rate))], dtype=np.uint8) << 6
+    path = tmp_path / "remote.sr"
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("version", "2")
+        z.writestr("metadata", "[device 1]\ncapturefile=logic-1\nunitsize=1\nsamplerate=1 MHz\nprobe1=0\nprobe7=IRRX\n")
+        z.writestr("logic-1-1", samples.tobytes())
+    [channel] = load(path)
+    assert channel.name == "IRRX"
+    [frame] = nec.decode(channel)
+    assert frame.data["command"] == 0x12

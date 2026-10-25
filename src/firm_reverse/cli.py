@@ -102,6 +102,28 @@ def cmd_capture(args) -> None:
         print("[warning: the Uno dropped edges; capture a shorter burst]", file=sys.stderr)
 
 
+SIGROK_DUMPS = "https://raw.githubusercontent.com/sigrokproject/sigrok-dumps/master/"
+SAMPLES = [
+    "ir/nec/hama_8in1/tv_matsui_0001/tv_matsui_0001_button_power_hold_3x.sr",
+    "ir/nec/joy-it_sbc-irc01/joy_it_sbc_irc01_enter_no_repeat.sr",
+    "i2c/melexis_mlx90614/melexis_mlx90614_5s_24deg.sr",
+    "i2c/eeprom_24xx/microchip_24aa16/microsoft-wireless-optical-mouse-init.sr",
+    "uart/counter/uart_count_19200_8n1.sr",
+]
+
+
+def cmd_samples(args) -> None:
+    from urllib.request import urlretrieve
+
+    out = Path(args.out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    for sample in SAMPLES:
+        target = out / Path(sample).name
+        if not target.exists():
+            urlretrieve(SIGROK_DUMPS + sample, target)
+        print(target)
+
+
 def cmd_synth(args) -> None:
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -141,6 +163,9 @@ def main() -> None:
     p.add_argument("--baud", type=int, default=500000)
     p.add_argument("--names", help="channel names for D2,D3, for example IR,BTN")
     p.set_defaults(fn=cmd_capture)
+    p = sub.add_parser("samples", help="download real captures from the public sigrok-dumps library")
+    p.add_argument("out_dir", nargs="?", default="captures/real")
+    p.set_defaults(fn=cmd_samples)
     p = sub.add_parser("synth", help="write synthetic demo captures")
     p.add_argument("out_dir", nargs="?", default="captures/demo")
     p.set_defaults(fn=cmd_synth)

@@ -7,6 +7,20 @@ from .decoders import i2c, nec, uart
 from .signals import Channel, Frame
 
 CLOCK_SCORE = 0.8
+
+I2C_ADDRESS_HINTS = {
+    **{a: "24xx EEPROM" for a in range(0x50, 0x58)},
+    0x5A: "MLX90614 IR thermometer or MPR121 touch controller",
+    0x48: "TMP102/LM75 temperature sensor or ADS1115 ADC",
+    0x68: "DS1307/DS3231 RTC or MPU-6050 IMU",
+    0x76: "BME280/BMP280 environmental sensor",
+    0x77: "BME280/BMP180 environmental sensor",
+    0x3C: "SSD1306 OLED display",
+    0x27: "PCF8574 I/O expander (character LCD backpack)",
+    0x40: "INA219 current sensor or PCA9685 PWM driver",
+    0x29: "VL53L0X time-of-flight sensor",
+    0x00: "general call address (broadcast to every device; MLX90614 also answers here)",
+}
 UART_MAX_FRAMING_ERRORS = 0.05
 
 
@@ -66,7 +80,7 @@ def _timing_profile(channel: Channel) -> dict:
 def summarize(findings: list[Finding], max_examples: int = 6) -> str:
     lines: list[str] = []
     for f in findings:
-        head = f"- {f.protocol} on {', '.join(f.channels)}"
+        head = f"- {f.protocol} on {'channels' if len(f.channels) > 1 else 'channel'} {', '.join(f.channels)}"
         if f.params:
             head += " (" + ", ".join(f"{k}={_fmt(v)}" for k, v in f.params.items() if v is not None) + ")"
         lines.append(head)
@@ -87,15 +101,32 @@ def _protocol_digest(f: Finding, max_examples: int) -> list[str]:
         by_device = Counter((fr.data["address"], fr.data["read"]) for fr in f.frames)
         period = _median_period([fr.t for fr in f.frames])
         out = [f"  device {a} {'read' if r else 'write'} x{n}" for (a, r), n in by_device.most_common(max_examples)]
-        out += [f"  e.g. t={fr.t:.4f}s {fr.data['address']} {'R' if fr.data['read'] else 'W'} {fr.data['data']}" for fr in f.frames[:max_examples]]
-        return out + ([f"  transactions repeat every ~{_fmt(period * 1e3)} ms"] if period else [])
+        out += _address_hints(sorted({int(fr.data["address"], 16) for fr in f.frames}))
+        out += [f"  e.g. t={fr.t:.4f}s {fr.data['address']} {'R' if fr.data['read'] else 'W'} {_clip(fr.data['data'])}" for fr in f.frames[:max_examples]]
+        return out + ([f"  transactions repeat every ~{_fmt(period * 1e3)} ms"] if period and len(f.frames) >= 10 else [])
     if f.protocol == "UART 8N1":
         payload = bytes(fr.data["byte"] for fr in f.frames)
-        text = payload.decode("ascii", errors="replace")
-        printable = sum(ch.isprintable() or ch in "\r\n" for ch in text) / max(len(text), 1)
-        sample = text[:200] if printable > 0.9 else payload[:48].hex(" ")
+        printable = sum(32 <= b < 127 or b in (9, 10, 13) for b in payload) / max(len(payload), 1)
+        sample = payload[:200].decode("ascii") if printable > 0.9 else payload[:48].hex(" ")
         return [f"  {'ascii' if printable > 0.9 else 'binary'} payload: {sample!r}"]
     return []
+
+
+def _address_hints(addresses: list[int]) -> list[str]:
+    eeprom = [a for a in addresses if 0x50 <= a <= 0x57]
+    out = []
+    if len(eeprom) > 1:
+        span = f"0x{eeprom[0]:02X} to 0x{eeprom[-1]:02X}"
+        out.append(f"  addresses {span} together look like one 24xx04/08/16 EEPROM, which answers on one address per 256-byte block")
+    elif eeprom:
+        out.append(f"  address 0x{eeprom[0]:02X} commonly belongs to: 24xx EEPROM")
+    out += [f"  address 0x{a:02X} commonly belongs to: {I2C_ADDRESS_HINTS[a]}" for a in addresses if a in I2C_ADDRESS_HINTS and a not in eeprom]
+    return out
+
+
+def _clip(data: list[str], limit: int = 16) -> str:
+    shown = " ".join(data[:limit])
+    return f"[{shown} ... +{len(data) - limit} more]" if len(data) > limit else f"[{shown}]"
 
 
 def _median_period(times: list[float]) -> float | None:

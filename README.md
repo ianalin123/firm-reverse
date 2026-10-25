@@ -51,6 +51,17 @@ Then open `http://<pi-ip>:8000` from a laptop or phone. Capture on whichever mac
 
 ## Capturing
 
+### No hardware: real captures from sigrok-dumps
+
+```fish
+uv run firm-reverse samples                       # downloads real captures into captures/real (gitignored)
+uv run firm-reverse run captures/real/microsoft-wireless-optical-mouse-init.sr
+uv run firm-reverse signals captures/real/tv_matsui_0001_button_power_hold_3x.sr
+```
+
+These are real recordings from the public [sigrok-dumps](https://github.com/sigrokproject/sigrok-dumps) library: a TV remote, an IR thermometer reading 24 C, a Microsoft wireless mouse reading its EEPROM at boot, and a UART counter.
+Any PulseView `.sr` session file loads directly.
+
 ### No analyzer: an Arduino Uno
 
 `firmware/uno_capture` turns an Uno into a two-channel edge logger on D2 and D3.

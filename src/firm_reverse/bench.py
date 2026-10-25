@@ -93,7 +93,9 @@ def explain_signals(gemma: Gemma, signal_summary: str, parts: str, on_token=None
     prompt = (
         f"Parts on the board:\n{parts}\n\nDecoded bus traffic:\n{signal_summary}\n\n"
         "In 3 to 5 short bullet points, explain what the device is doing: which chip talks to which, "
-        "what each message likely means, and how often."
+        "what each message likely means, and how often. On I2C the microcontroller is the master and "
+        "every address is a peripheral it talks to; peripherals never talk to each other. "
+        "Use the address hints to name likely parts, and say they are likely, not confirmed."
     )
     return gemma.ask(prompt, system=SYSTEM, on_token=on_token, max_output_tokens=300)
 
