@@ -28,6 +28,7 @@ Rules:
   and a small label overlay listing parts.
 - Expose window.setView(name) for "front" (looking at the face shown in shot 1), "back", "top" and "iso", which
   places the camera, hides the UI overlay, and renders one frame synchronously.
+- Create the renderer with preserveDrawingBuffer: true and render continuously in a requestAnimationFrame loop.
 - Set window.__ready = true after the first frame renders.
 Reply with only the HTML inside one ```html fenced block."""
 
