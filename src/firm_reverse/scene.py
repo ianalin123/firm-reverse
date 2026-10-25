@@ -4,6 +4,7 @@ Argon compares the renders with the real shots, then patches the scene until the
 import base64
 import json
 import re
+from urllib.parse import urlsplit
 from collections.abc import Callable
 
 from .guide import Guide, Session
@@ -87,9 +88,16 @@ def render(html: str, views: tuple[str, ...] = VIEWS) -> dict[str, bytes]:
             browser.close()
 
 
+def allowed_url(url: str) -> bool:
+    parts = urlsplit(url)
+    if parts.scheme in ("data", "blob", "about"):
+        return True
+    host = (parts.hostname or "").rstrip(".").lower()
+    return parts.scheme == "https" and host in ALLOWED_HOSTS and parts.port in (None, 443)
+
+
 def _only_cdn(route) -> None:
-    url = route.request.url
-    if url.startswith(("data:", "blob:", "about:")) or any(f"//{host}/" in url for host in ALLOWED_HOSTS):
+    if allowed_url(route.request.url):
         route.continue_()
     else:
         route.abort()

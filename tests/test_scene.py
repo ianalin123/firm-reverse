@@ -40,3 +40,12 @@ def test_loop_patches_until_match_and_keeps_best(tmp_path, monkeypatch):
     assert rendered[1] != rendered[0]
     assert best["iteration"] == 2 and best["match_score"] == 0.9
     assert session.scenes[-1] is best
+
+
+def test_render_allowlist_matches_exact_host():
+    assert scene.allowed_url("https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js")
+    assert scene.allowed_url("data:image/png;base64,AA")
+    assert not scene.allowed_url("http://169.254.169.254/?//cdn.jsdelivr.net/")
+    assert not scene.allowed_url("https://cdn.jsdelivr.net.evil.com/x")
+    assert not scene.allowed_url("http://cdn.jsdelivr.net/x")
+    assert not scene.allowed_url("https://cdn.jsdelivr.net:8443/x")
