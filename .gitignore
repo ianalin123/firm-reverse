@@ -1,0 +1,10 @@
+models/
+.venv/
+__pycache__/
+*.pyc
+captures/*
+!captures/demo/
+datasheets/*.pdf
+datasheets/index.json
+spec.md
+.env.local
