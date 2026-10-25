@@ -6,6 +6,8 @@
 
   const style = document.createElement("style");
   style.textContent = `
+    .capture-fits { color: #1d6b3d; font-weight: 700; }
+    .capture-mismatch { color: var(--fault, #c23b22); font-weight: 700; }
     .capture-card h2 { font-size: 16px; margin: 0 0 4px; }
     .capture-card .hint { font-size: 13.5px; color: var(--muted); margin: 0 0 10px; }
     .capture-card form { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; }
@@ -51,6 +53,13 @@
       head.textContent = `Capture ${result.capture}, decoded`;
       output.textContent = result.summary;
       fr.render(result.turn);
+      const check = (result.turn.capture_check || []).find((c) => Number(c.capture) === Number(result.capture));
+      if (check) {
+        const fits = check.verdict === "fits";
+        head.textContent = `Capture ${result.capture}, decoded. ${fits ? "Fits this device." : check.verdict === "mismatch" ? "Does not fit this device, not used as evidence." : "Unclear fit."}`;
+        head.className = fits ? "capture-fits" : "capture-mismatch";
+        output.textContent = `${result.summary}\n\nCheck: ${check.reason || ""}`;
+      }
       file.value = "";
       note.value = "";
       fr.setBusy(false, `Capture ${result.capture} added.`);

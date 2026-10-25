@@ -99,7 +99,11 @@ async def guide_capture(session_id: str, note: str = Form(""), capture: UploadFi
                 raise
             session.captures.append(f"User note: {note}\n{summary}" if note else summary)
             n = len(session.captures)
-            turn = server.guide().step(session, f"I captured with the Saleae: decoded summary is capture {n}. Use it.")
+            turn = server.guide().step(session, (
+                f"I captured with the Saleae: decoded summary is capture {n}. Before using it, check it against "
+                "the wiring you asked for and the parts the shots and datasheets show. If it does not fit this device, "
+                "say so in capture_check, do not use it as evidence, and ask for the capture again."
+            ))
             return {"capture": n, "summary": summary, "turn": turn}
 
     try:

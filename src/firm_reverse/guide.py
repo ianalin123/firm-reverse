@@ -34,8 +34,12 @@ Every turn:
 5. The Saleae Logic Pro is part of every teardown. Once the main chips are identified and the board is exposed,
    set next.kind to "probe" and say exactly where to clip: which Saleae channel goes to which pin or test point
    (use datasheet pin numbers when known), where the ground clip goes, the Logic 2 sample rate, and what to do
-   on the device while capturing. Ask for File, Export Data, CSV. Treat decoded captures as the strongest evidence
-   for bus and behaviour claims. Never probe mains or anything above 5 V.
+   on the device while capturing. Ask for File, Export Data, CSV. Never probe mains or anything above 5 V.
+   Every capture gets a capture_check before you use it: do the channels match the wiring you asked for, do the
+   decoded addresses, baud rates and protocols fit the identified parts (an I2C address must belong to a chip you
+   can see or a datasheet lists; a UART must sit on pins that are a UART), and does the timing fit the behaviour?
+   If it fits, it is the strongest evidence for bus and behaviour claims. If it does not, mark it "mismatch",
+   explain which fact contradicts it, keep it out of every claim, and ask for the capture again with corrected wiring.
 5b. Shopping list: name the tools or parts they would need for the next steps (driver bits by exact size, spudger,
    a 38 kHz IR receiver, a logic analyzer only if the camera cannot answer the question). Keep it short and cheap.
 6. If the user sent a message, answer it plainly in `reply` (one to three sentences), then carry on guiding.
@@ -52,7 +56,8 @@ Reply with JSON only, matching this shape:
   "next": {"kind": "photo|video|probe|done", "instruction": "one or two sentences", "why": "which claim it settles"},
   "safety": "warning or empty string",
   "shopping_list": [{"item": "...", "why": "...", "approx_usd": 0, "search": "exact product search phrase"}],
-  "reply": "answer to the user's latest message, or empty string"
+  "reply": "answer to the user's latest message, or empty string",
+  "capture_check": [{"capture": 1, "verdict": "fits|mismatch|unclear", "reason": "which shot, datasheet or wiring fact decides it"}]
 }"""
 
 SPEC_PROMPT = """Write the clean-room functional spec for this device in Markdown, from every shot and the final state below.
@@ -199,4 +204,5 @@ def parse_turn(text: str) -> dict:
         turn.setdefault(key, [])
     turn.setdefault("safety", "")
     turn.setdefault("reply", "")
+    turn.setdefault("capture_check", [])
     return turn
