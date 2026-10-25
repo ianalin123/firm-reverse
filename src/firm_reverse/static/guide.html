@@ -29,6 +29,7 @@
   .ask { margin: 18px 0 14px; }
   .ask .kind { font: 600 13px var(--mono); color: var(--trace); }
   .ask p { margin: 4px 0 0; font-size: clamp(22px, 4.2vw, 34px); line-height: 1.2; font-weight: 700; letter-spacing: -0.015em; max-width: 30ch; }
+  .ask p.long { font-size: clamp(19px, 2.6vw, 24px); max-width: 48ch; }
   .ask .why { font-size: 14px; color: var(--muted); margin-top: 8px; max-width: 70ch; }
   .safety { background: var(--fault-wash); border-left: 4px solid var(--fault); padding: 10px 14px; border-radius: 4px; margin: 0 0 14px; font-weight: 600; }
   .safety:empty { display: none; }
@@ -76,6 +77,17 @@
   .text p { margin: 6px 0; }
   .text code { font: 12.5px var(--mono); background: var(--paper); padding: 1px 4px; border-radius: 3px; }
   .text.streaming { white-space: pre-wrap; }
+  .chat { margin-top: 10px; }
+  .log { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; max-height: 260px; overflow-y: auto; }
+  .log:empty { display: none; }
+  .msg { max-width: 75ch; padding: 8px 12px; border-radius: 10px; font-size: 14.5px; }
+  .msg.you { align-self: flex-end; background: var(--ink); color: #fff; }
+  .msg.guide { align-self: flex-start; background: var(--panel); border: 1px solid var(--rule); }
+  .ask-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+  .ask-row input { min-height: 46px; }
+  .ask-row button { min-height: 46px; background: var(--ink); }
+  a.buy { display: inline-block; font: 700 13px var(--sans); color: #fff; background: var(--trace); border-radius: 6px; padding: 4px 10px; text-decoration: none; margin-top: 4px; }
+  a.buy:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
   @media (max-width: 760px) {
     .grid { grid-template-columns: 1fr; }
     .shoot { grid-template-columns: 1fr 1fr; }
@@ -105,6 +117,14 @@
   <div class="status" id="status"></div>
   <div class="film" id="film"></div>
 
+  <div class="chat">
+    <div class="log" id="log" aria-live="polite"></div>
+    <form class="ask-row" id="chatForm">
+      <input id="question" type="text" placeholder="Ask the guide, like “I can’t find the screws”" autocomplete="off">
+      <button id="askBtn">Ask</button>
+    </form>
+  </div>
+
   <div class="grid">
     <div>
       <section class="card">
@@ -129,7 +149,7 @@
         <table id="parts"><tr><td class="empty">Chips show up here once a shot makes their markings readable.</td></tr></table>
       </section>
       <section class="card">
-        <h2>Kit for this teardown</h2>
+        <h2>Order the kit</h2>
         <table id="shopping"><tr><td class="empty">The tools you need for the next steps, nothing more.</td></tr></table>
         <div id="total"></div>
       </section>
@@ -147,6 +167,34 @@ let shots = 0;
 $("media").addEventListener("change", () => { $("send").disabled = busy || !$("media").files.length; });
 $("send").addEventListener("click", sendShot);
 $("specBtn").addEventListener("click", writeSpec);
+$("chatForm").addEventListener("submit", (e) => { e.preventDefault(); ask(); });
+
+async function ensureSession() {
+  if (!sessionId) sessionId = (await (await api("/api/guide/session", { method: "POST" })).json()).id;
+}
+
+function say(who, text) {
+  $("log").append(el("div", { className: `msg ${who}`, textContent: text }));
+  $("log").scrollTop = $("log").scrollHeight;
+}
+
+async function ask() {
+  const question = $("question").value.trim();
+  if (!question || busy) return;
+  say("you", question);
+  $("question").value = "";
+  setBusy(true, "Thinking…");
+  try {
+    await ensureSession();
+    const form = new FormData();
+    form.append("message", question);
+    const { turn } = await (await api(`/api/guide/${sessionId}/chat`, { method: "POST", body: form })).json();
+    render(turn);
+    setBusy(false, "");
+  } catch (e) {
+    setBusy(false, `The guide did not answer: ${e.message}. Ask again.`, true);
+  }
+}
 
 async function api(path, options) {
   const res = await fetch(path, options);
@@ -162,7 +210,7 @@ async function sendShot() {
   if (!file) return;
   setBusy(true, file.type.startsWith("video/") ? "Uploading the video and watching it…" : "Looking at the photo…");
   try {
-    if (!sessionId) sessionId = (await (await api("/api/guide/session", { method: "POST" })).json()).id;
+    await ensureSession();
     addToFilm(file, shots + 1);
     const form = new FormData();
     form.append("media", file);
@@ -182,6 +230,7 @@ async function sendShot() {
 function setBusy(on, message, isError = false) {
   busy = on;
   $("send").disabled = on || !$("media").files.length;
+  $("askBtn").disabled = on;
   $("specBtn").disabled = on || shots === 0;
   $("status").textContent = message;
   $("status").className = "status" + (isError ? " error" : "");
@@ -198,7 +247,9 @@ function render(turn) {
   $("kind").textContent = next.kind === "done" ? "done" : `next: ${next.kind || "photo"}`;
   $("instruction").textContent = next.kind === "done" ? "That is everything a camera can settle. Write the spec." : next.instruction;
   $("why").textContent = next.why || "";
+  $("instruction").classList.toggle("long", $("instruction").textContent.length > 120);
   $("safety").textContent = turn.safety || "";
+  if (turn.reply) say("guide", turn.reply);
   $("device").textContent = turn.device || "Unknown device";
   const pct = Math.round(Math.max(0, Math.min(1, Number(turn.confidence) || 0)) * 100);
   $("meter").style.width = pct + "%";
@@ -217,7 +268,8 @@ function render(turn) {
 
   const items = turn.shopping_list;
   $("shopping").replaceChildren(...(items.length ? items.map((i) => el("tr", {},
-    el("td", {}, el("strong", { textContent: i.item }), el("div", { className: "empty", textContent: i.why })),
+    el("td", {}, el("strong", { textContent: i.item }), el("div", { className: "empty", textContent: i.why }),
+      el("a", { className: "buy", href: `https://www.amazon.com/s?k=${encodeURIComponent(i.search || i.item)}`, target: "_blank", rel: "noopener noreferrer", textContent: "Buy" })),
     el("td", { className: "usd", textContent: i.approx_usd ? `$${Number(i.approx_usd).toFixed(0)}` : "" })
   )) : [el("tr", {}, el("td", { className: "empty", textContent: "Nothing to buy for the next step." }))]));
   const total = items.reduce((sum, i) => sum + (Number(i.approx_usd) || 0), 0);

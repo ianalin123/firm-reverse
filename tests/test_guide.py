@@ -71,3 +71,15 @@ def test_failed_shot_leaves_no_file(monkeypatch):
     client.post(f"/api/guide/{session}/shot", files={"media": ("notes.txt", b"x", "text/plain")})
     _, directory = server._sessions[session]
     assert list(directory.iterdir()) == []
+
+
+def test_chat_turn_without_shots(monkeypatch):
+    fake = FakeClient()
+    monkeypatch.setattr(server, "_guide", Guide(client=fake))
+    client = TestClient(server.app)
+    session = client.post("/api/guide/session").json()["id"]
+    res = client.post(f"/api/guide/{session}/chat", data={"message": "where are the screws?"})
+    assert res.status_code == 200, res.text
+    assert "reply" in res.json()["turn"]
+    texts = [p.text for p in fake.calls[0][0].parts if p.text]
+    assert any("where are the screws?" in t for t in texts)

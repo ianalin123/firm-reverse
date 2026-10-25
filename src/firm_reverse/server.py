@@ -197,6 +197,25 @@ async def guide_shot(session_id: str, note: str = Form(""), media: UploadFile = 
         raise HTTPException(502, f"{type(e).__name__}: {e}")
 
 
+@app.post("/api/guide/{session_id}/chat")
+async def guide_chat(session_id: str, message: str = Form(...)):
+    session, _ = _session(session_id)
+    lock = _session_locks[session_id]
+    if not message.strip():
+        raise HTTPException(422, "type a question first")
+
+    def work():
+        with lock:
+            return {"turn": guide().step(session, message.strip())}
+
+    try:
+        return await asyncio.to_thread(work)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    except Exception as e:
+        raise HTTPException(502, f"{type(e).__name__}: {e}")
+
+
 @app.post("/api/guide/{session_id}/spec")
 def guide_spec(session_id: str):
     session, _ = _session(session_id)

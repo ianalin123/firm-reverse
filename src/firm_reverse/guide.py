@@ -15,6 +15,7 @@ from pathlib import Path
 ENV_FILE = Path(__file__).resolve().parents[2] / ".env.local"
 ARGON_MODEL = os.environ.get("ARGON_MODEL", "gemini-4-argon")
 MAX_SHOTS = 24
+MAX_MESSAGES = 40
 
 SYSTEM = """You are Firm Reverse, a hardware reverse engineering guide for people who only have a phone camera.
 The user films and photographs a device; you work out what it is, how it is built, and how it behaves,
@@ -22,7 +23,8 @@ then hand them a clean-room functional spec they could rebuild from. Never repro
 
 Every turn:
 1. Look at every shot, including earlier ones. Update your hypotheses about the device, its parts, and its behaviour.
-2. Verify: for each claim, cite the shot numbers that show it. Mark a claim confirmed only when a shot clearly shows it.
+2. Verify: for each claim, cite the shot numbers that show it. Mark a claim confirmed only when a shot shows it sharply and
+   legibly. A chip marking you can only partly read, or a part you infer from layout, is at most likely.
    If a newer shot contradicts an earlier claim, revise it and say so in `revisions`.
 3. Ask for exactly one next shot: the one that would most raise confidence in the weakest important claim.
    Be concrete about framing, angle, lighting, distance and what to do (open the case, flip the board, press a button,
@@ -31,7 +33,8 @@ Every turn:
    say exactly what not to touch and do not ask them to open powered mains equipment.
 5. Shopping list: name the tools or parts they would need for the next steps (driver bits by exact size, spudger,
    a 38 kHz IR receiver, a logic analyzer only if the camera cannot answer the question). Keep it short and cheap.
-6. When the parts, the board map and the behaviour are all confirmed or clearly unanswerable by camera, set next.kind to "done".
+6. If the user sent a message, answer it plainly in `reply` (one to three sentences), then carry on guiding.
+7. When the parts, the board map and the behaviour are all confirmed or clearly unanswerable by camera, set next.kind to "done".
 
 Reply with JSON only, matching this shape:
 {
@@ -43,7 +46,8 @@ Reply with JSON only, matching this shape:
   "parts": [{"ref": "U1", "marking": "text on the chip or unreadable", "function": "...", "evidence": [2]}],
   "next": {"kind": "photo|video|probe|done", "instruction": "one or two sentences", "why": "which claim it settles"},
   "safety": "warning or empty string",
-  "shopping_list": [{"item": "...", "why": "...", "approx_usd": 0}]
+  "shopping_list": [{"item": "...", "why": "...", "approx_usd": 0, "search": "exact product search phrase"}],
+  "reply": "answer to the user's latest message, or empty string"
 }"""
 
 SPEC_PROMPT = """Write the clean-room functional spec for this device in Markdown, from every shot and the final state below.
@@ -69,6 +73,7 @@ class Session:
     id: str
     shots: list[Shot] = field(default_factory=list)
     turns: list[dict] = field(default_factory=list)
+    messages: list[tuple[int, str]] = field(default_factory=list)
 
     @property
     def state(self) -> dict | None:
@@ -99,12 +104,18 @@ class Guide:
         session.shots.append(shot)
         return shot
 
-    def step(self, session: Session) -> dict:
+    def step(self, session: Session, message: str = "") -> dict:
         from google.genai import types
 
+        instruction = "Update your hypotheses, verify them, and ask for the next shot."
+        if message:
+            if len(session.messages) >= MAX_MESSAGES:
+                raise ValueError(f"a session holds at most {MAX_MESSAGES} messages")
+            session.messages.append((len(session.shots), message[:2000]))
+            instruction = f"The user says: {message[:2000]}\nAnswer them in `reply`, then {instruction[0].lower()}{instruction[1:]}"
         response = self.client.models.generate_content(
             model=self.model,
-            contents=self._contents(session, "Update your hypotheses, verify them, and ask for the next shot."),
+            contents=self._contents(session, instruction),
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM,
                 response_mime_type="application/json",
@@ -131,10 +142,13 @@ class Guide:
         from google.genai import types
 
         parts = []
+        earlier = session.messages[:-1] if session.messages and instruction.startswith("The user says") else session.messages
         for shot in session.shots:
             label = f"Shot {shot.index} ({'video' if shot.mime.startswith('video/') else 'photo'})"
             parts.append(types.Part.from_text(text=label + (f", user note: {shot.note}" if shot.note else "")))
             parts.append(types.Part.from_uri(file_uri=shot.uploaded.uri, mime_type=shot.mime))
+            parts += [types.Part.from_text(text=f"User message: {text}") for after, text in earlier if after == shot.index]
+        parts += [types.Part.from_text(text=f"User message: {text}") for after, text in earlier if after == 0]
         if session.state:
             parts.append(types.Part.from_text(text="Your previous state:\n" + json.dumps(session.state)))
         parts.append(types.Part.from_text(text=instruction))
@@ -172,4 +186,5 @@ def parse_turn(text: str) -> dict:
     for key in ("observations", "claims", "revisions", "parts", "shopping_list"):
         turn.setdefault(key, [])
     turn.setdefault("safety", "")
+    turn.setdefault("reply", "")
     return turn
