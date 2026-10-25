@@ -84,3 +84,18 @@ def test_sigrok_session_file(tmp_path):
     assert channel.name == "IRRX"
     [frame] = nec.decode(channel)
     assert frame.data["command"] == 0x12
+
+
+def test_sigrok_zip_bomb_rejected(tmp_path):
+    import zipfile
+
+    import pytest
+
+    from firm_reverse import loaders
+
+    path = tmp_path / "bomb.sr"
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("metadata", "[device 1]\ncapturefile=logic-1\nunitsize=1\nsamplerate=1 MHz\nprobe1=a\n")
+        z.writestr("logic-1-1", b"\0" * (loaders.MAX_SR_SAMPLE_BYTES + 1))
+    with pytest.raises(ValueError, match="expands past"):
+        loaders.load(path)
