@@ -1,4 +1,6 @@
-"""Shared access-code gate for public deployments. Inactive unless ACCESS_CODE is set."""
+"""Shared access-code gate for public deployments. Inactive unless ACCESS_CODE is set.
+
+The code travels in a POST body, never a query string, so it stays out of access logs."""
 
 import hmac
 import os
@@ -11,7 +13,7 @@ COOKIE_MAX_AGE = 7 * 24 * 3600
 
 FORM = b"""<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Access code</title></head>
 <body style="font-family:system-ui;display:grid;place-items:center;height:100vh;margin:0">
-<form method="get" action="/unlock"><label>Access code <input name="code" autofocus autocomplete="off"></label> <button>Enter</button></form>
+<form method="post" action="/unlock"><label>Access code <input name="code" autofocus autocomplete="off"></label> <button>Enter</button></form>
 </body></html>"""
 
 
@@ -41,17 +43,22 @@ class AccessCodeMiddleware:
     async def __call__(self, scope, receive, send):
         if not self.code or scope["type"] != "http":
             return await self.app(scope, receive, send)
-        if scope["path"] == UNLOCK_PATH:
-            return await self._unlock(scope, send)
+        if scope["path"] == UNLOCK_PATH and scope["method"] == "POST":
+            return await self._unlock(receive, send)
         if _matches(_cookie_value(scope), self.code):
             return await self.app(scope, receive, send)
         if scope["path"].startswith("/api/"):
             return await _send(send, 401, [(b"content-type", b"application/json")], b'{"detail":"access code required"}')
         return await _send(send, 401, [(b"content-type", b"text/html; charset=utf-8")], FORM)
 
-    async def _unlock(self, scope, send):
-        query = parse_qs(scope.get("query_string", b"").decode("latin-1"))
-        candidate = (query.get("code") or [""])[0]
+    async def _unlock(self, receive, send):
+        body = b""
+        while True:
+            message = await receive()
+            body += message.get("body", b"")
+            if len(body) > 4096 or not message.get("more_body"):
+                break
+        candidate = (parse_qs(body[:4096].decode("latin-1")).get("code") or [""])[0]
         if not _matches(candidate, self.code):
             return await _send(send, 401, [(b"content-type", b"text/html; charset=utf-8")], FORM)
         cookie = f"{COOKIE}={self.code}; Path=/; Max-Age={COOKIE_MAX_AGE}; HttpOnly; Secure; SameSite=Lax"

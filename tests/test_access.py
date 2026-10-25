@@ -32,14 +32,14 @@ def test_blocks_without_cookie():
 
 def test_wrong_code_rejected():
     client = make_client("s3cret")
-    response = client.get("/unlock?code=nope", follow_redirects=False)
+    response = client.post("/unlock", data={"code": "nope"}, follow_redirects=False)
     assert response.status_code == 401
     assert COOKIE not in client.cookies
 
 
 def test_unlock_sets_cookie_and_grants_access():
     client = make_client("s3cret")
-    response = client.get("/unlock?code=s3cret", follow_redirects=False)
+    response = client.post("/unlock", data={"code": "s3cret"}, follow_redirects=False)
     assert response.status_code == 303 and response.headers["location"] == "/"
     set_cookie = response.headers["set-cookie"]
     assert "HttpOnly" in set_cookie and "Secure" in set_cookie and "SameSite=Lax" in set_cookie
