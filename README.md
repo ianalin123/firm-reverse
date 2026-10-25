@@ -1,95 +1,64 @@
 # Firm Reverse
 
-An offline bench that reverse engineers a circuit board into a functional spec.
-Point a camera at the board, clip probes on its buses, and get a spec a design team can rebuild from.
-Gemma 4 runs on the device through LiteRT-LM. Nothing leaves the bench.
+Hypothesize, verify, revise. A phone and a logic analyzer turn any device into a spec you could rebuild it from.
 
-## Camera only: the guided teardown (Gemini 4 Argon)
+Reverse engineering hardware usually takes about $10k of lab gear. We think a phone, one logic analyzer and a model that checks its own work get you most of the way. Firm Reverse runs in three stages on Gemini 4 Argon. Each stage is the same loop. Make a claim, try to prove it wrong, write down what changed and why. It ends with a clean room functional spec. It never copies firmware.
 
-No analyzer, no scanner, just a phone. Open the page, take the shot it asks for, send it. Each turn Argon looks at every photo and video so far, ties each claim to the shots that prove it, revises claims a new shot contradicts, and asks for the one shot that settles the weakest claim: flip the board, tilt to kill glare on a chip, film the LEDs while it boots. It also lists the cheap tools you need for the next step, and warns before anything dangerous. When the camera has nothing left to settle, it writes the clean-room spec.
+Built for the Gemini 4 Argon SF hackathon (More Dimensions track) by Iana Lin and Sissi Wang. Repo: https://github.com/ianalin123/firm-reverse
+
+## The three stages
+
+1. Camera guide. You take the shot it asks for. Argon looks at every photo and video so far, makes claims about the device, and cites the shot numbers behind each one. A claim is confirmed only when a shot shows it sharply. When a new shot contradicts a claim, it revises it and records the reason in `revisions`. Then it asks for exactly one next shot, the one that settles the weakest claim (flip the board, tilt to kill glare, film the LEDs while it boots). It warns before anything dangerous and lists the cheap kit you need with buy links. Once a chip is identified, a datasheet Managed Agent runs in the background, finds the manufacturer datasheet, cross checks the photo reading and lists the pins to probe by datasheet pin number.
+2. Required Saleae probe step. Some things a camera cannot settle, like what is on the bus. Argon writes a wiring card: which Saleae channel goes to which pin (datasheet pin numbers), where the ground clip goes, the sample rate, and what to press while capturing. You export CSV from Logic 2 and upload it. It is decoded deterministically in plain Python (I2C, UART, NEC IR), not by a model. Every capture gets a `capture_check` against the identified device before it counts as evidence. Do the channels match the wiring, does the I2C address belong to a chip we can see, does the UART sit on UART pins. If it fits, it is the strongest evidence we have. If not, it is marked mismatch with the reason and kept out of every claim.
+3. Verified 3D reconstruction. Argon writes a Three.js scene of the device (enclosure, PCB, ICs, connectors, buttons, LEDs) placed from the photos. Headless Chromium renders it. Argon gets the renders and the real shots in one call, scores the match, lists the mismatches and patches the scene code. It repeats until the score is high enough. The UI shows each pass with its render and critique.
+
+When the parts, the board map and the behaviour are all settled and at least one capture is decoded, it writes the clean room spec. Parts with the shots and captures that prove them, the board map, the behaviour, the open questions.
+
+## Real results from today
+
+1. From one photo of an Arduino Uno it identified the board. A chip close up moved ATmega328P from likely to confirmed, with the reason recorded.
+2. The probe step produced a real wiring card. Channel 0 to Digital Pin 0 RX (ATmega328P pin 30). Channel 1 to Pin 1 TX (pin 31). Channel 2 to Pin 13 (pin 17). Channel 3 to RESET (pin 29). Ground clip on GND. 16 MS/s.
+3. The datasheet agent matched the ATmega328P and listed its I2C, UART and SPI pins.
+4. The 3D loop went from a 76% match on pass 1 to 86% on pass 2 after it fixed the chip rotation and the USB shell.
+5. A mismatched capture (a temperature sensor trace uploaded to the Arduino session) was flagged mismatch with the reason and rejected as evidence.
+
+Camera turns take about 20 seconds. The datasheet agent takes about 3 minutes. The 3D loop takes about 6 minutes.
+
+## How we used Gemini 4 Argon
+
+- Every shot, every turn. Each turn calls `generate_content` on `gemini-4-argon` with every photo and video in the session uploaded through the Files API, labeled by shot number and the user's note. Up to 24 shots. Video is for behaviour over time.
+- Structured state. The model replies in JSON with a fixed shape: device, confidence, claims with status and evidence, parts with chip markings, revisions, next step, safety warning, shopping list, capture checks. The previous state goes back in on the next turn so it builds on itself.
+- Thinking level per job. `thinking_level` is medium for each verification turn and low for streaming the spec. No temperature setting.
+- Managed Agent for datasheets. An Antigravity managed agent on `gemini-4-argon` with `background=True` searches the web for each part's datasheet while you keep shooting. Later turns and the spec cite what it found.
+- 3D critique in one call. Each pass sends the renders and the real shots together, with `max_output_tokens` at 65536 so the full corrected scene fits in one reply.
+
+## Run it
 
 ```fish
-echo "GEMINI_API_KEY=<event key>" > .env.local
+uv sync
+echo "GEMINI_API_KEY=..." > .env.local
 HOST=0.0.0.0 ALLOWED_HOSTS=(ipconfig getifaddr en0) uv run firm-reverse-serve
 # open http://<laptop-ip>:8000 on your phone
 ```
 
-When a question needs a probe, the probe bench at `/bench` takes over with a logic analyzer capture.
+Set `ACCESS_CODE` in the environment to gate a public deploy behind a code.
 
-## How the probe bench works
-
-1. **Signals (deterministic).** A capture from a logic analyzer (Saleae Logic 2 or Digilent WaveForms CSV, or any VCD) is decoded in plain Python: NEC infrared (with carrier detection), I2C, UART with auto baud. The model never sees raw samples, only a few lines of summary.
-2. **Parts (Gemma vision).** Gemma reads chip markings from a board photo, then each marking is matched against a local datasheet library.
-3. **Behaviour and spec (Gemma text).** Gemma combines the parts and the decoded traffic into an explanation and a clean-room functional spec.
-
-## Setup
+Docker:
 
 ```fish
-uv sync
-# models (about 6 GB, gitignored)
-mkdir -p models
-curl -L -o models/gemma-4-E2B-it.litertlm https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm
-curl -L -o models/gemma-4-E4B-it.litertlm https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it.litertlm
+docker build -t firm-reverse . && docker run -p 8000:8000 -e GEMINI_API_KEY=... firm-reverse
 ```
 
-Datasheets: drop PDFs named by part number (for example `ATtiny85.pdf`) into `datasheets/`, then `uv run firm-reverse index`.
+Saleae: capture in Logic 2, then File, Export Data, CSV. sigrok `.sr` and VCD files also load.
 
-## Use
+Tests: `uv run pytest -q` (37 tests).
 
-```fish
-uv run firm-reverse synth                                   # demo captures in captures/demo
-uv run firm-reverse signals captures/demo/sensor_board.csv  # no model needed
-uv run firm-reverse parts board.jpg
-uv run firm-reverse run captures/demo/sensor_board.csv --photo board.jpg --out spec.md
-uv run firm-reverse ask "Say hi" --image board.jpg          # timing check on a new device
-uv run firm-reverse-serve                                   # bench UI on :8000
-```
+## Built today vs reused
 
-`--model models/gemma-4-E4B-it.litertlm` swaps in the larger model. `--gpu` (or `FIRM_REVERSE_GPU=1` for the server) uses the GPU backend.
+Built today: the Argon camera guide, the verification loop, the datasheet Managed Agent, the Saleae probe step with capture check, the 3D reconstruction loop, the UI and the deploy.
 
-## Raspberry Pi 5
+Reused: the deterministic decoder library (I2C, UART 8N1, NEC IR) and the offline Gemma bench at `/bench`, both from a prior project. The bench is not part of this submission.
 
-```fish
-curl -LsSf https://astral.sh/uv/install.sh | sh
-git clone <this repo> firm-reverse; cd firm-reverse; uv sync
-# copy models/ over from a laptop or the event USB drive; do not download on venue wifi
-uv run firm-reverse ask "Say hi"
-HOST=0.0.0.0 ALLOWED_HOSTS=$(hostname -I | cut -d' ' -f1) uv run firm-reverse-serve
-```
+## Team
 
-The server binds to localhost by default and only answers to allowlisted host names (localhost, `*.local`, plus `ALLOWED_HOSTS`), so a `raspberrypi.local:8000` URL works without extra setup.
-
-Then open `http://<pi-ip>:8000` from a laptop or phone. Capture on whichever machine runs the analyzer software, export CSV, and upload it in the page. Inference still happens on the Pi.
-
-## Capturing
-
-### No hardware: real captures from sigrok-dumps
-
-```fish
-uv run firm-reverse samples                       # downloads real captures into captures/real (gitignored)
-uv run firm-reverse run captures/real/microsoft-wireless-optical-mouse-init.sr
-uv run firm-reverse signals captures/real/tv_matsui_0001_button_power_hold_3x.sr
-```
-
-These are real recordings from the public [sigrok-dumps](https://github.com/sigrokproject/sigrok-dumps) library: a TV remote, an IR thermometer reading 24 C, a Microsoft wireless mouse reading its EEPROM at boot, and a UART counter.
-Any PulseView `.sr` session file loads directly.
-
-### No analyzer: an Arduino Uno
-
-`firmware/uno_capture` turns an Uno into a two-channel edge logger on D2 and D3.
-It covers demodulated IR, slow UART, and button lines. Use a real analyzer for raw 38 kHz carrier or I2C.
-
-IR remote demo: wire a 38 kHz receiver module (VS1838B or TSOP38238) to 5V, GND, and D2. Then:
-
-```fish
-arduino-cli compile -b arduino:avr:uno firmware/uno_capture
-arduino-cli upload -b arduino:avr:uno -p /dev/cu.usbmodem* firmware/uno_capture
-uv run firm-reverse capture /dev/cu.usbmodem* --names IR,BTN --seconds 5   # press remote buttons while it records
-uv run firm-reverse signals captures/uno.csv
-```
-
-### Logic analyzers
-
-- **Saleae Logic 2:** File, Export Data, CSV, digital channels. Transition-only output loads directly.
-- **Digilent WaveForms (Analog Discovery 3):** Logic tool, Export, CSV with the time column.
-- Name channels in the software (SCL, SDA, IR, TX) so the spec uses real names.
+Iana Lin and Sissi Wang. https://github.com/ianalin123/firm-reverse
